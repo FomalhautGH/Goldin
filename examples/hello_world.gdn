@@ -1,0 +1,6 @@
+// Hello World example
+
+rt main() > i32 {
+    println("Hello World");
+    ret 0;
+}
