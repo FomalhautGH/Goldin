@@ -507,7 +507,7 @@ bool nob_set_current_dir(const char *path);
 #       define nob_cc(cmd) nob_cmd_append(cmd, "cl.exe")
 #    endif
 #  else
-#    define nob_cc(cmd) nob_cmd_append(cmd, "cc")
+#    define nob_cc(cmd) nob_cmd_append(cmd, "clang")
 #  endif
 #endif // nob_cc
 
