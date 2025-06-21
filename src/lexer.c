@@ -1,45 +1,29 @@
 #include "lexer.h"
+#include "token.h"
+#include <string.h>
 
 #define NOB_IMPLEMENTATION
 #include "../nob.h"
 
-#define STB_DS_IMPLEMENTATION
-#include "stb_ds.h"
+static Lexer lexer = {0};
 
-HashMap* hm_keywords = NULL;
-Lexer lexer = {0};
-
-void init_hm_keywords() {
-    shput(hm_keywords, "rt", Routine);
-    shput(hm_keywords, "ret", Return);
-}
-
-void free_hm_keywords() {
-    shfree(hm_keywords);
-}
-
-void init_lexer(String_Builder* source) {
-    lexer.file_content = source;
-    lexer.position = 0;
-}
-
-char peek() {
+static char peek() {
     assert(lexer.position < lexer.file_content->count);
     return lexer.file_content->items[lexer.position];
 }
 
-char peek_prev() {
+static char peek_prev() {
     assert(lexer.position - 1 >= 0);
     return lexer.file_content->items[lexer.position - 1];
 }
 
-int peek_next() {
-    assert(lexer.position < lexer.file_content->count);
-    if (lexer.position + 1 >= lexer.file_content->count) return -1;
-    return lexer.file_content->items[lexer.position + 1];
-}
+// static int peek_next() {
+//     assert(lexer.position < lexer.file_content->count);
+//     if (lexer.position + 1 >= lexer.file_content->count) return -1;
+//     return lexer.file_content->items[lexer.position + 1];
+// }
 
-char consume() {
+static char consume() {
     assert(lexer.position < lexer.file_content->count);
     return lexer.file_content->items[lexer.position++];
 }
@@ -47,32 +31,41 @@ char consume() {
 //         - last character
 // h e l l o
 // ^ first character
-void string_token(Token* tok) {
+static void string_token(Token* tok) {
     tok->type = StringLiteral;
-    // TODO error, manager unterminated string
+    // TODO error, manage unterminated string
     while (peek() != '"') sb_appendf(tok->content, "%c", consume());
     sb_append_null(tok->content);
     consume();
 }
 
-void identifier(Token* tok) {
+static TokenType keyword_id(String_Builder* id) {
+    TokenType result = Identifier;
+
+    if (strcmp(id->items, "rt") == 0) {
+        result = Routine; 
+    } else if (strcmp(id->items, "ret") == 0) {
+        result = Return;
+    }
+
+    return result;
+}
+
+static void identifier(Token* tok) {
     sb_appendf(tok->content, "%c", peek_prev());
     while (isalnum(peek())) sb_appendf(tok->content, "%c", consume());
     sb_append_null(tok->content);
-
-    int result = shget(hm_keywords, tok->content->items);
-    if (result != None) tok->type = result;
-    else tok->type = Identifier;
+    tok->type = keyword_id(tok->content);
 }
 
-void number(Token* tok) {
+static void number(Token* tok) {
     tok->type = NumberLiteral;
     sb_appendf(tok->content, "%c", peek_prev());
     while (isdigit(peek())) sb_appendf(tok->content, "%c", consume());
     sb_append_null(tok->content);
 }
 
-Token* next_token() {
+static Token* next_token() {
     Token* token = malloc(sizeof(Token)); // <-- Memory leak misterioso
     token->type = None;
     token->content = malloc(sizeof(String_Builder));
@@ -85,6 +78,7 @@ Token* next_token() {
         case '}': token->type = RightBracket; break;
         case ';': token->type = SemiColon; break;
         case '>': token->type = Greater; break;
+        case '=': token->type = Equal; break;
         case '<': token->type = Less; break;
         case '"': string_token(token); break;
         case '/': {
@@ -126,3 +120,10 @@ TokenVec* parse() {
 
     return vec;
 }
+
+void init_lexer(String_Builder* source) {
+    lexer.file_content = source;
+    lexer.position = 0;
+}
+
+void free_lexer() {}

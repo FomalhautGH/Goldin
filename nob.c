@@ -14,6 +14,7 @@ int main(int argc, char** argv) {
     NOB_GO_REBUILD_URSELF(argc, argv);
 
     Cmd cmd = {0};
+    // TODO: this is not portable
     if (argc >= 2 && strcmp("clean", argv[1]) == 0) {
         cmd_append(&cmd, "rm");
         cmd_append(&cmd, "nob");
@@ -39,7 +40,15 @@ int main(int argc, char** argv) {
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     cmd_append(&cmd, BUILD_DIR"au");
-    cmd_append(&cmd, EXAMPLES_DIR"hello_world.gdn");
+    cmd_append(&cmd, EXAMPLES_DIR"hello.gdn");
+    if (!cmd_run_sync_and_reset(&cmd)) return 1;
+
+    nob_cc(&cmd);
+    nob_cc_output(&cmd, BUILD_DIR"out");
+    nob_cc_inputs(&cmd, "./out.s");
+    if (!cmd_run_sync_and_reset(&cmd)) return 1;
+
+    cmd_append(&cmd, BUILD_DIR"out");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     return 0;

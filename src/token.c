@@ -1,4 +1,6 @@
 #include "token.h"
+#include <assert.h>
+#include <stddef.h>
 
 #define INITIAL_CAPACITY 64
 
@@ -22,6 +24,11 @@ void append_token(TokenVec* vec, Token token) {
 
     vec->vector[vec->size] = token;
     vec->size += 1;
+}
+
+Token* tokenvec_get(TokenVec* vec, size_t index) {
+    assert(index < vec->size);
+    return &vec->vector[index];
 }
 
 void print_tokenvec(TokenVec* vec) {

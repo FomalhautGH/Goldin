@@ -16,6 +16,7 @@ typedef enum {
     LeftBracket,
     RightBracket,
     Slash,
+    Equal,
     Greater,
     Less,
 
@@ -36,6 +37,7 @@ typedef struct {
 
 TokenVec* new_tokenvec(); 
 void append_token(TokenVec* vec, Token token); 
+Token* tokenvec_get(TokenVec* vec, size_t index);
 void print_tokenvec(TokenVec* vec); 
 void free_tokenvec(TokenVec* vec); 
 
