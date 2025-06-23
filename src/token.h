@@ -4,9 +4,9 @@
 #define NOB_STRIP_PREFIX
 #include "../nob.h"
 
-// TODO: refactoring togliere None
 typedef enum {
-    None,
+    Eof,
+    ParseError,
     Routine,
     Return,
     Identifier,
@@ -21,24 +21,15 @@ typedef enum {
     Less,
 
     NumberLiteral,
+    DoubleLiteral,
     StringLiteral
 } TokenType;
 
 typedef struct {
     TokenType type;
-    String_Builder *content;
+    String_Builder value;
 } Token;
 
-typedef struct {
-    Token* vector;
-    size_t size;
-    size_t capacity;
-} TokenVec;
-
-TokenVec* new_tokenvec(); 
-void append_token(TokenVec* vec, Token token); 
-Token* tokenvec_get(TokenVec* vec, size_t index);
-void print_tokenvec(TokenVec* vec); 
-void free_tokenvec(TokenVec* vec); 
+const char* display_type(TokenType type);
 
 #endif

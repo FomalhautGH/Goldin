@@ -5,86 +5,82 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define NOB_STRIP_PREFIX
+#include "../nob.h"
+
 #define GEN_ERROR 4
 #define FILE_NOT_FOUND 3
 #define WRONG_USAGE 2
 
-typedef struct {
-    TokenVec* tokens;
-    size_t position;
-    
-} Compiler;
-
-static Compiler comp = {0};
-static void init_compiler(TokenVec* vec) {
-    comp.tokens = vec;
-    comp.position = 0;
-}
-
-static Token* consume() {
-    return tokenvec_get(comp.tokens, comp.position++);
-}
-
-static Token* peek() {
-    return tokenvec_get(comp.tokens, comp.position);
-}
+typedef struct {} Compiler;
+static Compiler comp = {};
+static void init_compiler() { }
 
 static bool expect_type(TokenType type) {
-    return peek()->type == type;
+    return get_token().type == type;
 }
+
+static bool consume_expect(TokenType type, const char* msg) {
+    next_token();
+
+    if (!expect_type(type)) {
+        error(msg);
+        return false;
+    }
+
+    return true;
+}
+
+#define consume_exret(type, msg) \
+    do { \
+        if (!consume_expect(type, msg)) return false; \
+    } while (0) 
 
 // TODO: Indicate error line
-static void error(const char* msg) {
-    fprintf(stderr, "Syntax error: %s\n", msg);
-}
-
-static Token* consume_if(TokenType type, const char* msg) {
-    if (expect_type(type)) return consume();
-    error(msg);    
-    return NULL;
-}
+// static void error(const char* msg) {
+//     fprintf(stderr, "Syntax error: %s\n", msg);
+// }
 
 bool generate_IA_x86_64(String_Builder* out) {
     sb_appendf(out, ".intel_syntax noprefix\n");
     sb_appendf(out, ".text\n");
 
-    if (!consume_if(Routine, "Expected Routine")) return false;
+    consume_exret(Routine, "COMPILATION ERROR: Expected Routine");
+    consume_exret(Identifier, "COMPILATION ERROR: Expected routine name");
 
-    Token* rt_name = consume_if(Identifier, "Expected Function Name");
-    if (rt_name == NULL) return false;
-
-    if (strcmp(rt_name->content->items, "main") != 0) {
-        error("Expected the Function to be named 'main'");
+    Token name = get_token();
+    if (strcmp(name.value.items, "main") != 0) {
+        error("COMPILATION ERROR: Expected the Function to be named 'main'");
         return false;
     }
 
-    if (!consume_if(LeftParen, "Expected '(' after function name")) return false;
-    if (!consume_if(RightParen, "Expected ')'")) return false;
-    if (!consume_if(LeftBracket, "Expected '{'")) return false;
+    consume_exret(LeftParen, "COMPILATION ERROR: Expected '(' after routine name");
+    consume_exret(RightParen, "COMPILATION ERROR: Expected ')'");
+    consume_exret(LeftBracket, "COMPILATION ERROR: Expected '{'");
 
     sb_appendf(out, ".globl main\n\n");
     sb_appendf(out, "main:\n");
     sb_appendf(out, "   push rbp\n");
 
-    while (peek()->type != RightBracket) {
-        Token* tok = consume(); 
-        if (tok->type == Identifier) {
-            if (strcmp("putchar", tok->content->items) == 0) {
-                consume_if(LeftParen, "Expected '('");
-                Token* param = consume_if(NumberLiteral, "Expected integer");
-                consume_if(RightParen, "Expected ')'");
-                consume_if(SemiColon, "Expected ';'");
+    for (;;) {
+        next_token();
+        if (get_token().type == Identifier) {
+            Token id = get_token();
+            if (strcmp("putchar", id.value.items) == 0) {
+                consume_exret(LeftParen, "COMPILATION ERROR: Expected '('");
+                consume_exret(NumberLiteral, "COMPILATION ERROR: Expected integer");
+                int num = atoi(get_token().value.items);
+                consume_exret(RightParen, "COMPILATION ERROR: Expected ')'");
+                consume_exret(SemiColon, "COMPILATION ERROR: Expected ';'");
 
-                int int_p = atoi(param->content->items);
-                sb_appendf(out, "   mov edi, %d\n", int_p);
+                sb_appendf(out, "   mov edi, %d\n", num);
                 sb_appendf(out, "   call putchar\n");
             } else {
                 error("Unknown identifier");
                 return false;
             }
-        } else {
-            error("Unknown token");
-            return false;
+        } else if (get_token().type == RightBracket) {
+            break;
         }
     }
 
@@ -102,15 +98,12 @@ int main(int argc, char** argv) {
         exit(WRONG_USAGE);
     }
 
-    String_Builder content = {0};
-    if (!read_entire_file(argv[1], &content)) exit(FILE_NOT_FOUND);
+    if (!init_lexer(argv[1])) {
+        exit(FILE_NOT_FOUND);
+    }
 
-    init_lexer(&content);
+    init_compiler();
 
-    TokenVec* vec = parse();
-    print_tokenvec(vec);
-
-    init_compiler(vec);
     String_Builder result = {0};
     if (!generate_IA_x86_64(&result)) exit(GEN_ERROR);
 
@@ -120,8 +113,8 @@ int main(int argc, char** argv) {
     fprintf(assembly, "%s", result.items);
 
     sb_free(result);
-    sb_free(content);
-    free_tokenvec(vec);
     free_lexer();
+
+    fclose(assembly);
     exit(0);
 }
