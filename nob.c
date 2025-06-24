@@ -14,20 +14,6 @@ int main(int argc, char** argv) {
     NOB_GO_REBUILD_URSELF(argc, argv);
 
     Cmd cmd = {0};
-    // TODO: this is not portable
-    if (argc >= 2 && strcmp("clean", argv[1]) == 0) {
-        cmd_append(&cmd, "rm");
-        cmd_append(&cmd, "nob");
-        cmd_append(&cmd, "nob.old");
-        cmd_append(&cmd, "&&");
-        cmd_append(&cmd, "rm");
-        cmd_append(&cmd, "-fr");
-        cmd_append(&cmd, BUILD_DIR);
-        if (!cmd_run_sync_and_reset(&cmd)) return 1;
-        
-        return 0;
-    }
-
     mkdir_if_not_exists(BUILD_DIR);
 
     nob_cc(&cmd);
@@ -40,15 +26,11 @@ int main(int argc, char** argv) {
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     cmd_append(&cmd, BUILD_DIR"au");
-    cmd_append(&cmd, EXAMPLES_DIR"hello.gdn");
+    nob_cc_output(&cmd, BUILD_DIR"hello");
+    nob_cc_inputs(&cmd, EXAMPLES_DIR"hello.gdn");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
-    nob_cc(&cmd);
-    nob_cc_output(&cmd, BUILD_DIR"out");
-    nob_cc_inputs(&cmd, "./out.s");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
-
-    cmd_append(&cmd, BUILD_DIR"out");
+    cmd_append(&cmd, BUILD_DIR"hello");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     return 0;

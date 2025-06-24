@@ -28,6 +28,7 @@ static bool is_eof() {
 }
 
 static char peek() {
+    assert(!is_eof());
     return lexer.file_content.items[lexer.position];
 }
 
@@ -42,8 +43,12 @@ static char peek_prev() {
 }
 
 static char consume() {
-    assert(!is_eof());
-    lexer.line_offset_end++;
+    if (peek() == '\n') {
+        ++lexer.line_number;
+        lexer.line_offset_start = 1;
+        lexer.line_offset_end = 0;
+    }
+    ++lexer.line_offset_end;
     return lexer.file_content.items[lexer.position++];
 }
 
@@ -53,6 +58,7 @@ static char consume() {
 static void parse_string() {
     lexer.token_type = StringLiteral;
     lexer.line_offset_start = lexer.line_offset_end - 1;
+    // TODO: Multine line string increment line number.
     while (peek() != '"' && !is_eof()) sb_appendf(&lexer.token_value, "%c", consume());
 
     if (is_eof()) {
@@ -77,6 +83,7 @@ static TokenType keyword_id(String_Builder* id) {
 }
 
 static void parse_identifier() {
+    lexer.line_offset_start = lexer.line_offset_end - 1;
     sb_appendf(&lexer.token_value, "%c", peek_prev());
     while (isalnum(peek())) sb_appendf(&lexer.token_value, "%c", consume());
     sb_append_null(&lexer.token_value);
@@ -99,30 +106,27 @@ static void parse_number() {
 }
 
 Token get_token() {
-    Token token = {.type = lexer.token_type, .value = lexer.token_value};
-    return token;
+    return (Token){.type = lexer.token_type, .value = lexer.token_value};
 }
 
-static void reset_token() {
+static void reset_previus_token() {
     sb_free(lexer.token_value);
-    String_Builder value = {0};
-    lexer.token_value = value;
+    lexer.token_value = (String_Builder) {0};
     lexer.token_type = ParseError;
+    lexer.line_offset_start = lexer.line_offset_end; 
 }
 
 bool next_token() {
-    reset_token();
-    lexer.line_offset_start = lexer.line_offset_end;
+    reset_previus_token();
 
-    while (isspace(peek())) {
-        char space = consume(); 
-        if (space == '\n') {
-            ++lexer.line_number;
-            lexer.line_offset_end = 1;
-        }
+    while (!is_eof() && isspace(peek())) {
+        consume(); 
     }
 
-    if (is_eof()) return false;
+    if (is_eof()) {
+        lexer.token_type = Eof;
+        return false;
+    }
 
     // TODO: Support multiline comments
     if (peek() == '/' && peek_next() == '/') {
@@ -165,14 +169,14 @@ bool init_lexer(const char* input_stream) {
     lexer.file_content = source;
     lexer.position = 0;
 
-    String_Builder value = {0};
-    lexer.token_value = value;
+    lexer.token_value = (String_Builder) {0};
     lexer.token_type = ParseError;
 
     lexer.line_number = 1;
     lexer.line_offset_end = 1;
     lexer.line_offset_start = lexer.line_offset_end;
 
+    next_token();
     return true;
 }
 

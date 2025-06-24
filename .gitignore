@@ -1,4 +1,6 @@
 build/
 *.s
+*.asm
 nob
 nob.old
+Makefile
