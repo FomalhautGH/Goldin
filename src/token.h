@@ -20,6 +20,8 @@ typedef enum {
     Greater,
     Less,
 
+    VarTypei32,
+
     NumberLiteral,
     DoubleLiteral,
     StringLiteral

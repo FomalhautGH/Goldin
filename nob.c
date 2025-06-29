@@ -1,6 +1,5 @@
 #include <assert.h>
 #include <stdbool.h>
-#include <string.h>
 
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
@@ -25,13 +24,13 @@ int main(int argc, char** argv) {
     nob_cc_inputs(&cmd, SRC_DIR"main.c");
     if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
-    cmd_append(&cmd, BUILD_DIR"au");
-    nob_cc_output(&cmd, BUILD_DIR"hello");
-    nob_cc_inputs(&cmd, EXAMPLES_DIR"hello.gdn");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
-
-    cmd_append(&cmd, BUILD_DIR"hello");
-    if (!cmd_run_sync_and_reset(&cmd)) return 1;
+    // cmd_append(&cmd, BUILD_DIR"au");
+    // nob_cc_output(&cmd, BUILD_DIR"hello_world");
+    // nob_cc_inputs(&cmd, EXAMPLES_DIR"hello_world.gdn");
+    // if (!cmd_run_sync_and_reset(&cmd)) return 1;
+    //
+    // cmd_append(&cmd, BUILD_DIR"hello_world");
+    // if (!cmd_run_sync_and_reset(&cmd)) return 1;
 
     return 0;
 }

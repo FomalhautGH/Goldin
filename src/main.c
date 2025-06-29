@@ -1,24 +1,72 @@
 #include "token.h"
 #include "lexer.h"
-#include <stdbool.h>
-#include <stdio.h>
+#include <signal.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef enum {
+    QuadWord,
+    DoubleWord,
+    Word,
+    Byte
+} VarSize;
+
+typedef enum {
+    Var,
+    Literal
+} ArgType;
+
+typedef union {
+    int i32;
+    float f32; // Literal
+    size_t offset; // Var
+} ArgValue;
+
+typedef struct {
+    ArgType type;
+    ArgValue value;
+} Arg;
+
+typedef enum {
+    ReserveBytes,
+    LoadVar32,
+    StoreVar32,
+    RoutineCall 
+} OpType;
+
+typedef union {
+    size_t num_bytes;                                             // ReserveBytes
+    size_t load_offset;                                           // LoadVar32
+    struct { VarSize size; size_t store_offset; int arg_store; }; // StoreVar32
+    struct { const char* name; Arg arg; };                        // RoutineCall
+} OpValue;
+
+typedef struct {
+    OpType type;
+    OpValue value;
+} Op;
+
+#define STB_DS_IMPLEMENTATION
+#include "stb_ds.h"
 
 #define NOB_STRIP_PREFIX
 #include "../nob.h"
 
-#define FAILED_CMD 5
-#define GEN_ERROR 4
-#define FILE_NOT_FOUND 3
-#define WRONG_USAGE 2
+typedef struct {
+    const char* key;
+    int value;
+} Vars;
 
-typedef struct {} Compiler;
-// static Compiler comp = {};
+typedef struct {
+} Compiler;
+
+// static Compiler comp = {0};
 static void init_compiler() {}
 static void free_compiler() {}
 
 static bool consume() {
+    // printf("%s\n", display_type(get_token().type));
     return next_token();
 }
 
@@ -46,61 +94,196 @@ static bool expect_and_consume(TokenType type, const char* msg) {
         if (!expect_type(type, msg)) return false;        \
     } while (0) 
 
-bool generate_IA_x86_64(String_Builder* out) {
-    sb_appendf(out, ".intel_syntax noprefix\n");
-    sb_appendf(out, ".text\n");
+static bool compile_routine_body(Op* ops[]) {
+    Vars* vars = NULL;
+    shdefault(vars, -1);
+    size_t offset = 0;
 
-    expect_and_consume_ret(Routine, "COMPILATION ERROR: Expected Routine");
-
-    expect_ret(Identifier, "COMPILATION ERROR: Expected routine name");
-    Token main = get_token();
-    if (strcmp(main.value.items, "main") != 0) {
-        error("COMPILATION ERROR: Expected the Function to be named 'main'");
+    consume(); // Routine name
+    if (strcmp(get_value().items, "main") != 0) {
+        error("COMPILATION ERROR: Only main function supported right now");
         return false;
     }
+
     consume();
+    if (!expect_type(LeftParen, "COMPILATION ERROR: Expected '(' after routine name")) return false;
+    // TODO: function arguments
+    consume();
+    if (!expect_type(RightParen, "COMPILATION ERROR: Expected ')'")) return false;
 
-    expect_and_consume_ret(LeftParen, "COMPILATION ERROR: Expected '(' after routine name");
-    expect_and_consume_ret(RightParen, "COMPILATION ERROR: Expected ')'");
-    expect_and_consume_ret(LeftBracket, "COMPILATION ERROR: Expected '{'");
+    consume();
+    if (!expect_type(LeftBracket, "COMPILATION ERROR: Expected '{' after routine declaration")) return false;
 
-    sb_appendf(out, ".globl main\n\n");
-    sb_appendf(out, "main:\n");
-    sb_appendf(out, "    push rbp\n");
-
-    while (get_token().type != Eof) {
-        if (get_token().type == Identifier) {
-            if (strcmp("putchar", get_token().value.items) == 0) {
+    while (true) {
+        consume();
+        switch (get_type()) {
+            case RightBracket: {
+                if (offset > 0) arrins(*ops, 0, ((Op){.type = ReserveBytes, .value.num_bytes = offset})); 
                 consume();
-                expect_and_consume_ret(LeftParen, "COMPILATION ERROR: Expected '('");
-
-                expect_ret(NumberLiteral, "COMPILATION ERROR: Expected integer");
-                int num = atoi(get_token().value.items);
+                shfree(vars);
+                return true;
+            }
+            case VarTypei32: {
                 consume();
+                if (!expect_type(Identifier, "COMPILATION ERROR: Expected variable name")) return false;
+                const char* var_name = strdup(get_value().items);
 
-                expect_and_consume_ret(RightParen, "COMPILATION ERROR: Expected ')'");
-                expect_and_consume_ret(SemiColon, "COMPILATION ERROR: Expected ';'");
+                if (shget(vars, var_name) != -1) {
+                    error("COMPILATION ERROR: Redefintion of variable");
+                    return false;
+                }
 
-                sb_appendf(out, "    mov edi, %d\n", num);
-                sb_appendf(out, "    call putchar\n");
-            } else {
-                error("COMPILATION ERROR: Unknown identifier");
+                offset += 4;
+                shput(vars, var_name, offset);
+
+                consume();
+                if (get_type() == Equal) {
+                    consume();
+                    if (!expect_type(NumberLiteral, "COMPILATION ERROR: Expected integer")) return false;
+                    int arg = strtol(get_value().items, NULL, 10);
+                    // TODO: Check errno
+
+                    arrput(*ops, ((Op){.type = StoreVar32, .value.store_offset = offset, .value.size = DoubleWord, .value.arg_store = arg}));
+                    consume();
+                }
+
+                if (!expect_type(SemiColon, "COMPILATION ERROR: Expected ';' after variable declaration")) return false;
+              
+            } break;
+            // TODO: Only routines call for now
+            case Identifier: {
+                const char* routine_name = strdup(get_value().items);
+                consume();
+                if (!expect_type(LeftParen, "COMPILATION ERROR: Expected '(' after routine call")) return false;
+                
+                consume();
+                if (get_type() == Identifier) {
+                    int offset = shget(vars, get_value().items);
+                    if (offset == -1) {
+                        error("COMPILATION ERROR: Usage of undeclared variable");
+                        return false;
+                    } 
+
+                    arrput(*ops, ((Op){.type = RoutineCall, .value.name = routine_name, .value.arg.type = Var, .value.arg.value.offset = offset}));
+                    consume();
+                } else if (get_type() == NumberLiteral) {
+                    TODO("");
+                }
+
+                if (!expect_type(RightParen, "COMPILATION ERROR: Expected ')' after argument list")) return false;
+                consume();
+                if (!expect_type(SemiColon, "COMPILATION ERROR: Expected ';' after variable declaration")) return false;
+            } break;
+            case Eof: {
+                shfree(vars);
+                error("COMPILATION ERROR: Expected '}' after routine body");
                 return false;
             }
-        } else if (get_token().type == RightBracket) {
-            consume();
-        } else {
-            printf("%s\n", display_type(get_token().type));
-            error("COMPILATION ERROR: Unsupported token type");
-            break;
+            default: {
+                printf("%s\n", display_type(get_token().type));
+                error("COMPILATION ERROR: Unsupported token type in routine");
+                return false;
+            }
         }
     }
 
-    sb_appendf(out, "    pop rbp\n");
-    sb_appendf(out, "    mov rax, 0\n");
-    sb_appendf(out, "    ret\n");
+    return false;
+}
 
-    sb_append_null(out);
+bool generate_ops(Op* ops[]) {
+    while (true) {
+        consume();
+        switch (get_token().type) {
+            case Eof: return true;
+            case ParseError: return false;
+            case Routine: return compile_routine_body(ops);
+            default: {
+                // printf("%s\n", display_type(get_token().type));
+                error("COMPILATION ERROR: A program file is composed by only routines");
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static const char* size_to_str(VarSize size) {
+    switch (size) {
+        case QuadWord: { return "QuadWord"; }
+        case DoubleWord: { return "DoubleWord"; }
+        case Word: { return "Word"; }
+        case Byte: { return "Byte"; }
+        default: UNREACHABLE("");
+    }
+}
+
+static void dump_op(Op op) {
+    switch (op.type) {
+        case ReserveBytes: {
+            printf("ReserveBytes ");
+            printf("{ .num_bytes = %zu }", op.value.num_bytes);
+            break;
+        }
+        case StoreVar32: {
+            printf("StoreVar32 ");
+            printf("{ .store_offset = %zu, .size = %s, .arg = %d }", op.value.store_offset, size_to_str(op.value.size), op.value.arg_store);
+            break;
+        }
+        case LoadVar32: {
+            printf("LoadVar32 ");
+            printf("{ .load_offset = %zu }", op.value.load_offset);
+            break;
+        }
+        case RoutineCall: {
+            printf("RoutineCall ");
+            printf("{ .name = %s, .arg.value.offset = %zu }", op.value.name, op.value.arg.value.offset);
+            break;
+        }
+        default: UNREACHABLE("");
+    }
+}
+
+static void dump_ops(Op* ops) {
+    size_t len = arrlen(ops);
+
+    printf("Operations: \n");
+    for (size_t i = 0; i < len; ++i) {
+        dump_op(ops[i]);
+        printf("\n");
+    }
+    printf("\n");
+}
+
+static bool generate_IA_x86_64(String_Builder* out, Op* ops) {
+    sb_appendf(out, ".intel_syntax noprefix\n");
+    sb_appendf(out, ".text\n");
+
+    sb_appendf(out, ".globl main\n");
+    sb_appendf(out, "main:\n");
+    sb_appendf(out, "    push rbp\n");
+    sb_appendf(out, "    mov rbp, rsp\n");
+
+    size_t len = arrlen(ops);
+
+    for (size_t i = 0; i < len; ++i) {
+        Op op = ops[i];
+        switch (op.type) {
+            case ReserveBytes: sb_appendf(out, "    sub rsp, %zu\n", op.value.num_bytes); break;
+            case StoreVar32: sb_appendf(out, "    mov dword ptr [rsp - %zu], %d\n", op.value.store_offset, op.value.arg_store); break;
+            case RoutineCall: {
+                sb_appendf(out, "    mov rdi, qword ptr [rsp - %zu]\n", op.value.arg.value.offset);
+                sb_appendf(out, "    call %s\n", op.value.name);
+
+            } break;
+            default: UNREACHABLE("");
+        }
+    }
+
+    sb_appendf(out, "    mov rsp, rbp\n");
+    sb_appendf(out, "    xor rax, rax\n");
+    sb_appendf(out, "    pop rbp\n");
+    sb_appendf(out, "    ret\n");
     return true;
 }
 
@@ -110,6 +293,11 @@ static void print_usage(char** argv) {
     fprintf(stderr, "    -o\n");
     fprintf(stderr, "        Output path\n");
 }
+
+#define WRONG_USAGE 2
+#define FILE_NOT_FOUND 3
+#define GEN_ERROR 4
+#define FAILED_CMD 5
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -131,8 +319,13 @@ int main(int argc, char** argv) {
 
     init_compiler();
 
+    Op* ops = NULL;
+    generate_ops(&ops);
+    dump_ops(ops);
+
     String_Builder result = {0};
-    if (!generate_IA_x86_64(&result)) exit(GEN_ERROR);
+    if (!generate_IA_x86_64(&result, ops)) exit(GEN_ERROR);
+    arrfree(ops);
 
     String_Builder asm_file = {0};
     sb_appendf(&asm_file, "%s.asm", argv[file_name]);
@@ -153,5 +346,5 @@ int main(int argc, char** argv) {
     sb_free(result);
     free_lexer();
     free_compiler();
-    return 0;
+    exit(0);
 }

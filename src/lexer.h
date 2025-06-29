@@ -21,16 +21,17 @@ typedef struct {
     TokenType token_type;
     String_Builder token_value;
 
-    size_t line_number;
+    size_t line_number_start;
+    size_t line_number_end;
     size_t line_offset_start;
     size_t line_offset_end;
 } Lexer;
 
-void error(const char* msg);
 Token get_token();
 bool next_token();
-bool init_lexer(const char* input_stream);
 void free_lexer();
+void error(const char* msg);
+bool init_lexer(const char* input_stream);
 
 TokenType get_type();
 String_Builder get_value();

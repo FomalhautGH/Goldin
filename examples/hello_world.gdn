@@ -1,0 +1,19 @@
+// Hello World example
+
+rt main() {
+    putchar(72); // H
+    putchar(101); // e
+    putchar(108); // l
+    putchar(108); // l
+    putchar(111); // o
+
+    putchar(32); // space
+
+    putchar(87); // W
+    putchar(111); // o
+    putchar(114); // r
+    putchar(108); // l
+    putchar(100); // d
+
+    putchar(10); // \n
+}

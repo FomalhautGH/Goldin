@@ -19,6 +19,7 @@ const char* display_type(TokenType type) {
         case NumberLiteral: return "NumberLiteral";
         case DoubleLiteral: return "DoubleLiteral";
         case StringLiteral: return "StringLiteral";
+        case VarTypei32: return "VarTypei32";
         default: UNREACHABLE("Unknown type to display");
     }
 }

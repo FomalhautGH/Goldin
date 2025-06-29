@@ -1,8 +1,5 @@
 #include "lexer.h"
 #include "token.h"
-#include <assert.h>
-#include <ctype.h>
-#include <stdio.h>
 #include <string.h>
 
 #define NOB_IMPLEMENTATION
@@ -10,18 +7,6 @@
 #include "../nob.h"
 
 static Lexer lexer = {0};
-
-TokenType get_type() {
-    return lexer.token_type;
-}
-
-String_Builder get_value() {
-    return lexer.token_value;
-}
-
-void error(const char* msg) {
-    fprintf(stderr, "%s:%zu:%zu: %s\n", lexer.input_stream, lexer.line_number, lexer.line_offset_start, msg);
-}
 
 static bool is_eof() {
     return lexer.position >= lexer.file_content.count;
@@ -42,71 +27,74 @@ static char peek_prev() {
     return lexer.file_content.items[lexer.position - 1];
 }
 
-static char consume() {
-    if (peek() == '\n') {
-        ++lexer.line_number;
-        lexer.line_offset_start = 1;
-        lexer.line_offset_end = 0;
-    }
+static char consume_inside() {
+    if (peek() == '\n') ++lexer.line_number_end;
     ++lexer.line_offset_end;
     return lexer.file_content.items[lexer.position++];
 }
 
-//         - last character
-// h e l l o
-// ^ first character
+static char consume() {
+    if (peek() == '\n') {
+        ++lexer.line_number_end;
+        lexer.line_offset_start = 1;
+        lexer.line_offset_end = 0;
+    }
+
+    ++lexer.line_offset_end;
+    return lexer.file_content.items[lexer.position++];
+}
+
+static void keyword_id() {
+    lexer.token_type = Identifier;
+    char* id = lexer.token_value.items;
+
+    if (strcmp(id, "rt") == 0) {
+        lexer.token_type = Routine;
+    } else if (strcmp(id, "ret") == 0) {
+        lexer.token_type = Return;
+    } else if (strcmp(id, "i32") == 0) {
+        lexer.token_type = VarTypei32;
+    }
+}
+
+static void push_char(char jar) {
+    sb_appendf(&lexer.token_value, "%c", jar);
+}
+
 static void parse_string() {
     lexer.token_type = StringLiteral;
+    lexer.line_number_start = lexer.line_number_end;
     lexer.line_offset_start = lexer.line_offset_end - 1;
-    // TODO: Multine line string increment line number.
-    while (peek() != '"' && !is_eof()) sb_appendf(&lexer.token_value, "%c", consume());
+
+    while (!is_eof() && peek() != '"') push_char(consume_inside());
 
     if (is_eof()) {
         error("PARSE ERROR: Unterminated string");
         lexer.token_type = ParseError;
+    } else {
+        consume();
     }
-
-    consume();
-    sb_append_null(&lexer.token_value);
-}
-
-static TokenType keyword_id(String_Builder* id) {
-    TokenType result = Identifier;
-
-    if (strcmp(id->items, "rt") == 0) {
-        result = Routine; 
-    } else if (strcmp(id->items, "ret") == 0) {
-        result = Return;
-    }
-
-    return result;
 }
 
 static void parse_identifier() {
+    lexer.line_number_start = lexer.line_number_end;
     lexer.line_offset_start = lexer.line_offset_end - 1;
-    sb_appendf(&lexer.token_value, "%c", peek_prev());
-    while (isalnum(peek())) sb_appendf(&lexer.token_value, "%c", consume());
-    sb_append_null(&lexer.token_value);
-    lexer.token_type = keyword_id(&lexer.token_value);
+    push_char(peek_prev());
+    while (isalnum(peek())) push_char(consume());
+    keyword_id();
 }
 
 static void parse_number() {
     lexer.token_type = NumberLiteral;
-    sb_appendf(&lexer.token_value, "%c", peek_prev());
-    while (isdigit(peek())) sb_appendf(&lexer.token_value, "%c", consume());
+    push_char(peek_prev());
+    while (isdigit(peek())) push_char(consume());
 
     if (peek() == '.') {
-        sb_appendf(&lexer.token_value, ".");
+        push_char('.');
         consume();
         lexer.token_type = DoubleLiteral;
-        while (isdigit(peek())) sb_appendf(&lexer.token_value, "%c", consume());
+        while (isdigit(peek())) push_char(consume());
     }
-
-    sb_append_null(&lexer.token_value);
-}
-
-Token get_token() {
-    return (Token){.type = lexer.token_type, .value = lexer.token_value};
 }
 
 static void reset_previus_token() {
@@ -114,14 +102,29 @@ static void reset_previus_token() {
     lexer.token_value = (String_Builder) {0};
     lexer.token_type = ParseError;
     lexer.line_offset_start = lexer.line_offset_end; 
+    lexer.line_number_start = lexer.line_number_end;
+}
+
+void error(const char* msg) {
+    fprintf(stderr, "%s:%zu:%zu: %s\n", lexer.input_stream, lexer.line_number_start, lexer.line_offset_start, msg);
+}
+
+Token get_token() {
+    return (Token){.type = lexer.token_type, .value = lexer.token_value};
+}
+
+TokenType get_type() {
+    return lexer.token_type;
+}
+
+String_Builder get_value() {
+    return lexer.token_value;
 }
 
 bool next_token() {
     reset_previus_token();
 
-    while (!is_eof() && isspace(peek())) {
-        consume(); 
-    }
+    while (!is_eof() && isspace(peek())) consume(); 
 
     if (is_eof()) {
         lexer.token_type = Eof;
@@ -134,7 +137,6 @@ bool next_token() {
         return next_token();
     }
 
-    bool result = true;
     switch (consume()) {
         case '(': lexer.token_type = LeftParen; break;
         case ')': lexer.token_type = RightParen; break;
@@ -147,17 +149,13 @@ bool next_token() {
         case '/': lexer.token_type = Slash; break;
         case '"': parse_string(); break;
         default: {
-                     if (isalpha(peek_prev())) {
-                         parse_identifier(); 
-                     } else if (isdigit(peek_prev())) {
-                         parse_number(); 
-                     } else {
-                         UNREACHABLE("Weird");
-                     }
-                 }
+            if (isalpha(peek_prev())) parse_identifier(); 
+            else if (isdigit(peek_prev())) parse_number(); 
+            else UNREACHABLE("Weird");
+        }
     }
 
-    return result;
+    return true;
 }
 
 bool init_lexer(const char* input_stream) {
@@ -172,11 +170,11 @@ bool init_lexer(const char* input_stream) {
     lexer.token_value = (String_Builder) {0};
     lexer.token_type = ParseError;
 
-    lexer.line_number = 1;
+    lexer.line_number_end = 1;
+    lexer.line_number_start = lexer.line_offset_end;
     lexer.line_offset_end = 1;
     lexer.line_offset_start = lexer.line_offset_end;
 
-    next_token();
     return true;
 }
 
