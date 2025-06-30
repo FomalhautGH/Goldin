@@ -4,7 +4,7 @@
 
 #define NOB_IMPLEMENTATION
 #define NOB_STRIP_PREFIX
-#include "../nob.h"
+#include "nob.h"
 
 static Lexer lexer = {0};
 

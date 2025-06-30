@@ -5,7 +5,7 @@
 #include "token.h"
 
 #define NOB_STRIP_PREFIX
-#include "../nob.h"
+#include "nob.h"
 
 typedef struct { 
     char* key;

@@ -2,7 +2,7 @@
 #define TOKEN_HEADER
 
 #define NOB_STRIP_PREFIX
-#include "../nob.h"
+#include "nob.h"
 
 typedef enum {
     Eof,
