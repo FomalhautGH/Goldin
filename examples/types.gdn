@@ -1,0 +1,18 @@
+// Goldin types
+
+rt main() {
+    i8 a = 44;
+    i16 b = 43;
+    i32 c = 42;
+    i64 d = 41;
+
+    u8 x = 45;
+    u16 y = 46;
+    u32 z = 47;
+    u64 q = 48;
+
+    f32 p = 3.14;
+    f64 e = 6.28;
+
+    bool bu = true;
+}

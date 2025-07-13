@@ -30,7 +30,8 @@ typedef struct {
 Token get_token();
 bool next_token();
 void free_lexer();
-void error(const char* msg);
+void error_expected(TokenType expected, TokenType got);
+void error_msg(const char* msg);
 bool init_lexer(const char* input_stream);
 
 TokenType get_type();

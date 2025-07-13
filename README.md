@@ -4,7 +4,6 @@
 Goldin is toy programming language built for educational purposes
 
 ## Dependencies
-- make
 - clang
 
 ## Testing

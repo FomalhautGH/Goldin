@@ -52,8 +52,26 @@ static void keyword_id() {
         lexer.token_type = Routine;
     } else if (strcmp(id, "ret") == 0) {
         lexer.token_type = Return;
+    } else if (strcmp(id, "i8") == 0) {
+        lexer.token_type = VarTypei8;
+    } else if (strcmp(id, "i16") == 0) {
+        lexer.token_type = VarTypei16;
     } else if (strcmp(id, "i32") == 0) {
         lexer.token_type = VarTypei32;
+    } else if (strcmp(id, "i64") == 0) {
+        lexer.token_type = VarTypei64;
+    } else if (strcmp(id, "u8") == 0) {
+        lexer.token_type = VarTypeu8;
+    } else if (strcmp(id, "u16") == 0) {
+        lexer.token_type = VarTypeu16;
+    } else if (strcmp(id, "u32") == 0) {
+        lexer.token_type = VarTypeu32;
+    } else if (strcmp(id, "u64") == 0) {
+        lexer.token_type = VarTypeu64;
+    } else if (strcmp(id, "f32") == 0) {
+        lexer.token_type = VarTypef32;
+    } else if (strcmp(id, "f64") == 0) {
+        lexer.token_type = VarTypef64;
     }
 }
 
@@ -69,7 +87,7 @@ static void parse_string() {
     while (!is_eof() && peek() != '"') push_char(consume_inside());
 
     if (is_eof()) {
-        error("PARSE ERROR: Unterminated string");
+        error_msg("PARSE ERROR: Unterminated string");
         lexer.token_type = ParseError;
     } else {
         consume();
@@ -85,14 +103,14 @@ static void parse_identifier() {
 }
 
 static void parse_number() {
-    lexer.token_type = NumberLiteral;
+    lexer.token_type = IntLiteral;
     push_char(peek_prev());
     while (isdigit(peek())) push_char(consume());
 
     if (peek() == '.') {
         push_char('.');
         consume();
-        lexer.token_type = DoubleLiteral;
+        lexer.token_type = RealLiteral;
         while (isdigit(peek())) push_char(consume());
     }
 }
@@ -105,8 +123,16 @@ static void reset_previus_token() {
     lexer.line_number_start = lexer.line_number_end;
 }
 
-void error(const char* msg) {
+void error_msg(const char* msg) {
     fprintf(stderr, "%s:%zu:%zu: %s\n", lexer.input_stream, lexer.line_number_start, lexer.line_offset_start, msg);
+}
+
+void error_expected(TokenType expected, TokenType got) {
+    String_Builder msg = {0};
+    sb_appendf(&msg, "Expected %s but insted got %s", display_type(expected), display_type(got));
+    sb_append_null(&msg);
+    error_msg(msg.items);
+    sb_free(msg);
 }
 
 Token get_token() {

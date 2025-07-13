@@ -12,6 +12,7 @@
 #define FILE_NOT_FOUND 3
 #define GEN_ERROR 4
 #define FAILED_CMD 5
+#define COMPILATION_ERROR 6
 
 static void print_usage(char** argv) {
     fprintf(stderr, "Usage: %s [OPTIONS] <inputs...> \n", argv[0]);
@@ -41,7 +42,7 @@ int main(int argc, char** argv) {
     init_compiler();
 
     Op* ops = NULL;
-    generate_ops(&ops);
+    if (!generate_ops(&ops)) exit(COMPILATION_ERROR);
     dump_ops(ops);
 
     String_Builder result = {0};

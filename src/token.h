@@ -20,10 +20,21 @@ typedef enum {
     Greater,
     Less,
 
+    VarTypei8,
+    VarTypei16,
     VarTypei32,
+    VarTypei64,
 
-    NumberLiteral,
-    DoubleLiteral,
+    VarTypeu8,
+    VarTypeu16,
+    VarTypeu32,
+    VarTypeu64,
+
+    VarTypef32,
+    VarTypef64,
+
+    IntLiteral,
+    RealLiteral,
     StringLiteral
 } TokenType;
 

@@ -16,10 +16,18 @@ const char* display_type(TokenType type) {
         case Equal: return "Equal";
         case Greater: return "Greater";
         case Less: return "Less";
-        case NumberLiteral: return "NumberLiteral";
-        case DoubleLiteral: return "DoubleLiteral";
-        case StringLiteral: return "StringLiteral";
+        case VarTypei8: return "VarTypei8";
+        case VarTypei16: return "VarTypei16";
         case VarTypei32: return "VarTypei32";
-        default: UNREACHABLE("Unknown type to display");
+        case VarTypei64: return "VarTypei64";
+        case VarTypeu8: return "VarTypeu8";
+        case VarTypeu16: return "VarTypeu16";
+        case VarTypeu32: return "VarTypeu32";
+        case VarTypeu64: return "VarTypeu64";
+        case VarTypef32: return "VarTypef32";
+        case VarTypef64: return "VarTypef64";
+        case IntLiteral: return "IntLiteral";
+        case RealLiteral: return "RealLiteral";
+        case StringLiteral: return "StringLiteral";
     }
 }

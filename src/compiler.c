@@ -1,7 +1,9 @@
 #include "compiler.h"
 #include "lexer.h"
+#include "token.h"
+#include <stdio.h>
 
-static Compiler comp = {0};
+// static Compiler comp = {0};
 void init_compiler() {}
 void free_compiler() {}
 
@@ -9,125 +11,99 @@ static bool consume() {
     return next_token();
 }
 
-static bool expect_type(TokenType type, const char* msg) {
+static bool expect_type(TokenType type) {
     if (get_token().type != type) {
-        error(msg);
+        error_expected(get_token().type, type);
         return false;
     }
     return true;
 }
 
-static bool consume_and_expect(TokenType type, const char* msg) {
+static bool consume_and_expect(TokenType type) {
     next_token();
-    if (!expect_type(type, msg)) return false; 
+    if (!expect_type(type)) return false; 
     return true;
 }
 
-static bool expect_and_consume(TokenType type, const char* msg) {
-    if (!expect_type(type, msg)) return false; 
-    next_token();
-    return true;
-}
+static bool compile_expression(Op* ops[]) {
+    // TODO: Check errno in convertions and overflow if literal too big
+    // TODO: Pratt parser
 
-static void push_op(Op* ops[], OpType type, ...) {
-    va_list args;
-    va_start(args, type);
-    switch (type) {
-        case ReserveBytes: {
-            size_t num = va_arg(args, size_t);
-            arrput(*ops, ((Op) {
-                .type = ReserveBytes,
-                .value.num_bytes = num,
-            }));
-        } break;
-        case StoreVar32: {
-            size_t offset = va_arg(args, size_t);
-            int arg = va_arg(args, int);
-            arrput(*ops, ((Op) {
-                .type = StoreVar32,
-                .value.store_offset = offset,
-                .value.store_arg = arg
-            }));
-        } break;
-        case LoadVar32: {
-            size_t offset = va_arg(args, size_t);
-            arrput(*ops, ((Op) {
-                .type = LoadVar32,
-                .value.load_offset = offset,
-            }));
-        } break;
-        case RoutineCall: {
-            const char* name = va_arg(args, const char*);
-
-            Arg arg = {0};
-            arg.type = va_arg(args, ArgType);
-            switch (arg.type) {
-                case Var: {
-                    size_t offset = va_arg(args, size_t);
-                    arg.value.offset = offset;
-                } break;
-                case Literal: {
-                    int val = va_arg(args, int);
-                    arg.value.i32 = val;
-                } break;
-            }
-
-            arrput(*ops, ((Op) {
-                .type = RoutineCall,
-                .value.name = name,
-                .value.routine_arg = arg
-            }));
-        } break;
+    switch (get_type()) {
+        case Identifier: break; // Variable
+        case IntLiteral: TODO("Integer literals unsupported yet"); break;
+        case RealLiteral: TODO("Floats unsupported yet"); break;
+        case StringLiteral: TODO("String usopported yet"); break;
+        default: UNREACHABLE("Unsupported token type in expression");
     }
-    va_end(args);
+
+    return true;
 }
 
 static bool declare_var(Op* ops[], TokenType var_type, size_t* offset, VarsHashMap* vars) {
-    consume_and_expect(Identifier, "COMPILATION ERROR: Expected variable name");
+    if (!consume_and_expect(Identifier)) return false;
     const char* var_name = strdup(get_value().items);
 
     if (shget(vars, var_name) != -1) {
-        error("COMPILATION ERROR: Redefintion of variable");
+        error_msg("COMPILATION ERROR: Redefinition of variable");
         return false;
     }
 
-    *offset += 4;
+    size_t bytes = 0;
+    TokenType lit = IntLiteral;
+    switch (var_type) {
+        case VarTypeu8:
+        case VarTypei8: bytes = 1; break;
+
+        case VarTypeu16:
+        case VarTypei16: bytes = 2; break;
+
+        case VarTypef32: lit = RealLiteral; TODO("Float not supported yet");
+        case VarTypeu32:
+        case VarTypei32: bytes = 4; break;
+
+        case VarTypef64: lit = RealLiteral; TODO("Double not supported yet");
+        case VarTypeu64:
+        case VarTypei64: bytes = 8; break;
+
+        default: UNREACHABLE("Not a valid var type");
+    }
+
+    *offset += bytes;
     shput(vars, var_name, *offset);
 
     consume();
     if (get_type() == Equal) {
-        consume_and_expect(NumberLiteral, "COMPILATION ERROR: Expected integer");
-        int arg = strtol(get_value().items, NULL, 10);
-        // TODO: Check errno
-        push_op(ops, StoreVar32, *offset, arg);
         consume();
+        if (!compile_expression(ops)) return false;
+        // consume(); // TODO: Do we need it after compiler_expression implementation?
     }
 
-    if (!expect_type(SemiColon, "COMPILATION ERROR: Expected ';' after variable declaration")) return false;
+    if (!expect_type(SemiColon)) return false;
     return true;
 }
 
 static bool routine_call(Op* ops[], VarsHashMap* vars) {
-    const char* routine_name = strdup(get_value().items);
-    consume_and_expect(LeftParen, "COMPILATION ERROR: Expected '(' after routine call");
+    // const char* routine_name = strdup(get_value().items);
+    if (!consume_and_expect(LeftParen)) return false;
 
     consume();
     if (get_type() == Identifier) {
         int offset = shget(vars, get_value().items);
         if (offset == -1) {
-            error("COMPILATION ERROR: Usage of undeclared variable");
+            error_msg("COMPILATION ERROR: Usage of undeclared variable");
             return false;
         } 
-        push_op(ops, RoutineCall, routine_name, Var, offset);
+        // push_op(ops, RoutineCall, routine_name, LocalVar, offset);
         consume();
-    } else if (get_type() == NumberLiteral) {
-        int arg = strtol(get_value().items, NULL, 10);
-        push_op(ops, RoutineCall, routine_name, Literal, arg);
+    } else if (get_type() == IntLiteral) {
+        // int arg = strtol(get_value().items, NULL, 10);
+        // push_op(ops, RoutineCall, routine_name, Literal, arg);
         consume();
     }
 
-    if (!expect_type(RightParen, "COMPILATION ERROR: Expected ')' after argument list")) return false;
-    consume_and_expect(SemiColon, "COMPILATION ERROR: Expected ';' after variable declaration");
+    if (!expect_type(RightParen)) return false;
+    if (!consume_and_expect(SemiColon)) return false;
 
     return true;
 }
@@ -140,25 +116,34 @@ static bool compile_routine_body(Op* ops[]) {
 
     consume();
     if (strcmp(get_value().items, "main") != 0) {
-        error("COMPILATION ERROR: Only main function supported right now");
+        error_msg("COMPILATION ERROR: Only main function supported right now");
         return false;
     }
 
     // TODO: function arguments
-    consume_and_expect(LeftParen, "COMPILATION ERROR: Expected '(' after routine name");
-    consume_and_expect(RightParen, "COMPILATION ERROR: Expected ')'");
-    consume_and_expect(LeftBracket, "COMPILATION ERROR: Expected '{' after routine declaration");
+    if (!consume_and_expect(LeftParen)) return false;
+    if (!consume_and_expect(RightParen)) return false;
+    if (!consume_and_expect(LeftBracket)) return false;
 
     while (true) {
         consume();
         switch (get_type()) {
-            // TODO: Support other types
-            case VarTypei32: if (!declare_var(ops, VarTypei32, &offset, vars)) return false; break;
+            case VarTypei8:
+            case VarTypei16:
+            case VarTypei32:
+            case VarTypei64:
+            case VarTypeu8:
+            case VarTypeu16:
+            case VarTypeu32:
+            case VarTypeu64:
+            case VarTypef32:
+            case VarTypef64: if (!declare_var(ops, get_type(), &offset, vars)) return false; break;
+
              // TODO: Only routines call for now and no arity checked
             case Identifier: if (!routine_call(ops, vars)) return false; break;
 
             case RightBracket: {
-                if (offset > 0) arrins(*ops, 0, ((Op){.type = ReserveBytes, .value.num_bytes = offset})); 
+                if (offset > 0) arrins(*ops, 0, OpReserveBytes(offset)); 
                 shfree(vars);
                 consume();
                 return true;
@@ -166,14 +151,14 @@ static bool compile_routine_body(Op* ops[]) {
 
             case Eof: {
                 shfree(vars);
-                error("COMPILATION ERROR: Expected '}' after routine body");
+                error_msg("COMPILATION ERROR: Expected '}' after routine body");
                 return false;
             } break;
 
             default: {
                 shfree(vars);
                 printf("%s\n", display_type(get_token().type));
-                error("COMPILATION ERROR: Unsupported token type in routine");
+                error_msg("COMPILATION ERROR: Unsupported token type in routine");
                 return false;
             }
         }
@@ -191,7 +176,7 @@ bool generate_ops(Op* ops[]) {
             case Routine: return compile_routine_body(ops);
             default: {
                 // printf("%s\n", display_type(get_token().type));
-                error("COMPILATION ERROR: A program file is composed by only routines");
+                error_msg("COMPILATION ERROR: A program file is composed by only routines");
                 return false;
             }
         }
@@ -200,48 +185,9 @@ bool generate_ops(Op* ops[]) {
     return true;
 }
 
-static const char* size_to_str(VarSize size) {
-    switch (size) {
-        case QuadWord: { return "QuadWord"; }
-        case DoubleWord: { return "DoubleWord"; }
-        case Word: { return "Word"; }
-        case Byte: { return "Byte"; }
-        default: UNREACHABLE("");
-    }
-}
-
-static void dump_op(Op op) {
-    switch (op.type) {
-        case ReserveBytes: {
-            printf("ReserveBytes ");
-            printf("{ .num_bytes = %zu }", op.value.num_bytes);
-        } break;
-        case StoreVar32: {
-            printf("StoreVar32 ");
-            printf("{ .store_offset = %zu, .arg = %d }", op.value.store_offset, op.value.store_arg);
-        } break;
-        case LoadVar32: {
-            printf("LoadVar32 ");
-            printf("{ .load_offset = %zu }", op.value.load_offset);
-        } break;
-        case RoutineCall: {
-            printf("RoutineCall ");
-            printf("{ .name = %s, .arg.value.offset = %zu }", op.value.name, op.value.routine_arg.value.offset);
-        } break;
-        default: UNREACHABLE("");
-    }
-}
-
-void dump_ops(Op* ops) {
-    size_t len = arrlen(ops);
-
-    printf("Operations: \n");
-    for (size_t i = 0; i < len; ++i) {
-        dump_op(ops[i]);
-        printf("\n");
-    }
-
-    printf("\n");
+void store_imm(String_Builder* out, Op op) {
+    const char* size = "";
+    sb_appendf(out, "    mov %s ptr [rsp + %zu], %d\n", size, op.store_imm.offset, op.store_imm.arg.four_bytes);
 }
 
 bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
@@ -256,22 +202,29 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
     size_t len = arrlen(ops);
     for (size_t i = 0; i < len; ++i) {
         Op op = ops[i];
+        // TODO: Store only supports qwords
         switch (op.type) {
-            case ReserveBytes: sb_appendf(out, "    sub rsp, %zu\n", op.value.num_bytes); break;
-            case StoreVar32: sb_appendf(out, "    mov dword ptr [rsp + %zu], %d\n", op.value.store_offset, op.value.store_arg); break;
+            case ReserveBytes: sb_appendf(out, "    sub rsp, %zu\n", op.reserve_bytes.bytes); break;
+            case StoreImmediate: sb_appendf(out, "    mov qword ptr [rsp + %zu], %d\n", op.store_imm.offset, op.store_imm.arg.four_bytes); break;
+            case StoreLocalVar: {
+                sb_appendf(out, "   mov	rax, qword ptr [rbp - %zu]\n", op.store_loc.offset_src);
+                sb_appendf(out, "   mov	qword ptr [rbp - %zu], rax\n", op.store_loc.offset_dst);
+	
+            } break;
             case RoutineCall: {
-                if (op.value.routine_arg.type == Var) {
-                    sb_appendf(out, "    mov rdi, qword ptr [rsp + %zu]\n", op.value.routine_arg.value.offset);
-                } else if (op.value.routine_arg.type == Literal) {
-                    sb_appendf(out, "    mov rdi, %d\n", op.value.routine_arg.value.i32);
+                if (op.routine_call.arg.type == LocalVar) {
+                    sb_appendf(out, "    mov rdi, qword ptr [rsp + %zu]\n", op.routine_call.arg.offset);
+                } else if (op.routine_call.arg.type == Literal) {
+                    // TODO Support other literals
+                    sb_appendf(out, "    mov rdi, %d\n", op.routine_call.arg.four_bytes);
                 } else {
                     UNREACHABLE("");
                 }
 
-                sb_appendf(out, "    call %s\n", op.value.name);
-
+                sb_appendf(out, "    call %s\n", op.routine_call.name);
             } break;
-            default: UNREACHABLE("");
+            case LoadLocalVar: TODO("LoadLocalVar"); break;
+            case BinaryOperation: TODO("BinaryOperation"); break;
         }
     }
 
@@ -282,3 +235,18 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
     return true;
 }
 
+static void dump_op(Op op) {
+    printf("Type: %d", op.type);
+}
+
+void dump_ops(Op *ops) {
+    size_t len = arrlen(ops);
+
+    printf("Operations: \n");
+    for (size_t i = 0; i < len; ++i) {
+        dump_op(ops[i]);
+        printf("\n");
+    }
+
+    printf("\n");
+}
