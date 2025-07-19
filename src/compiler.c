@@ -1,7 +1,10 @@
 #include "compiler.h"
 #include "lexer.h"
 #include "token.h"
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 // static Compiler comp = {0};
 void init_compiler() {}
@@ -25,16 +28,29 @@ static bool consume_and_expect(TokenType type) {
     return true;
 }
 
-static bool compile_expression(Op* ops[]) {
+static bool compile_expression(Op* ops[], Arg* arg, VarsHashMap* vars) {
     // TODO: Check errno in convertions and overflow if literal too big
     // TODO: Pratt parser
 
     switch (get_type()) {
-        case Identifier: break; // Variable
-        case IntLiteral: TODO("Integer literals unsupported yet"); break;
+        case Identifier: {
+            const char* name = get_value().items;
+            size_t offset = shget(vars, name);
+
+            arg->type = Offset;
+            arg->offset = offset;
+
+            consume();
+        } break;
+        case IntLiteral: {
+            int32_t value = strtol(get_value().items, NULL, 10);
+            arg->type = DWord;
+            memcpy(&arg->value, &value, sizeof(int32_t));
+            consume();
+        } break;
         case RealLiteral: TODO("Floats unsupported yet"); break;
         case StringLiteral: TODO("String usopported yet"); break;
-        default: UNREACHABLE("Unsupported token type in expression");
+        default: printf("%d\n", get_token().type); UNREACHABLE("Unsupported token type in expression");
     }
 
     return true;
@@ -50,7 +66,6 @@ static bool declare_var(Op* ops[], TokenType var_type, size_t* offset, VarsHashM
     }
 
     size_t bytes = 0;
-    TokenType lit = IntLiteral;
     switch (var_type) {
         case VarTypeu8:
         case VarTypei8: bytes = 1; break;
@@ -58,11 +73,11 @@ static bool declare_var(Op* ops[], TokenType var_type, size_t* offset, VarsHashM
         case VarTypeu16:
         case VarTypei16: bytes = 2; break;
 
-        case VarTypef32: lit = RealLiteral; TODO("Float not supported yet");
+        case VarTypef32: TODO("Float not supported yet");
         case VarTypeu32:
         case VarTypei32: bytes = 4; break;
 
-        case VarTypef64: lit = RealLiteral; TODO("Double not supported yet");
+        case VarTypef64: TODO("Double not supported yet");
         case VarTypeu64:
         case VarTypei64: bytes = 8; break;
 
@@ -75,32 +90,24 @@ static bool declare_var(Op* ops[], TokenType var_type, size_t* offset, VarsHashM
     consume();
     if (get_type() == Equal) {
         consume();
-        if (!compile_expression(ops)) return false;
-        // consume(); // TODO: Do we need it after compiler_expression implementation?
+
+        Arg arg = {0};
+        if (!compile_expression(ops, &arg, vars)) return false;
+        arrput(*ops, OpAssignLocal(*offset, arg));
     }
 
     if (!expect_type(SemiColon)) return false;
     return true;
 }
 
-static bool routine_call(Op* ops[], VarsHashMap* vars) {
-    // const char* routine_name = strdup(get_value().items);
+static bool routine(Op* ops[], VarsHashMap* vars) {
+    const char* name = strdup(get_value().items);
     if (!consume_and_expect(LeftParen)) return false;
-
     consume();
-    if (get_type() == Identifier) {
-        int offset = shget(vars, get_value().items);
-        if (offset == -1) {
-            error_msg("COMPILATION ERROR: Usage of undeclared variable");
-            return false;
-        } 
-        // push_op(ops, RoutineCall, routine_name, LocalVar, offset);
-        consume();
-    } else if (get_type() == IntLiteral) {
-        // int arg = strtol(get_value().items, NULL, 10);
-        // push_op(ops, RoutineCall, routine_name, Literal, arg);
-        consume();
-    }
+
+    Arg arg = {0};
+    if (!compile_expression(ops, &arg, vars)) return false;
+    arrput(*ops, OpRoutineCall(name, arg));
 
     if (!expect_type(RightParen)) return false;
     if (!consume_and_expect(SemiColon)) return false;
@@ -140,7 +147,7 @@ static bool compile_routine_body(Op* ops[]) {
             case VarTypef64: if (!declare_var(ops, get_type(), &offset, vars)) return false; break;
 
              // TODO: Only routines call for now and no arity checked
-            case Identifier: if (!routine_call(ops, vars)) return false; break;
+            case Identifier: if (!routine(ops, vars)) return false; break;
 
             case RightBracket: {
                 if (offset > 0) arrins(*ops, 0, OpReserveBytes(offset)); 
@@ -185,9 +192,101 @@ bool generate_ops(Op* ops[]) {
     return true;
 }
 
-void store_imm(String_Builder* out, Op op) {
-    const char* size = "";
-    sb_appendf(out, "    mov %s ptr [rsp + %zu], %d\n", size, op.store_imm.offset, op.store_imm.arg.four_bytes);
+void store_immediate(String_Builder* out, Op op) {
+    switch (op.assign_loc.arg.type) {
+        case Byte: {
+           int8_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int8_t));
+           sb_appendf(out, "    mov byte ptr [rbp - %zu], %d\n", op.assign_loc.offset_dst, value);
+        }
+        case Word: {
+           int16_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int16_t));
+           sb_appendf(out, "    mov word ptr [rbp - %zu], %d\n", op.assign_loc.offset_dst, value);
+        }
+        case DWord: {
+           int32_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int32_t));
+           sb_appendf(out, "    mov dword ptr [rbp - %zu], %d\n", op.assign_loc.offset_dst, value);
+        }
+        case QWord: {
+           int64_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int64_t));
+           sb_appendf(out, "    mov qword ptr [rbp - %zu], %ld\n", op.assign_loc.offset_dst, value);
+        }
+        case Offset: UNREACHABLE("");
+    }
+}
+
+void routine_call(String_Builder* out, Op op) {
+    switch (op.assign_loc.arg.type) {
+        case Offset: sb_appendf(out, "    mov rdi, qword ptr [rbp - %zu]\n", op.routine_call.arg.offset); break;
+        case Byte: {
+           int8_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int8_t));
+           sb_appendf(out, "    mov rdi, %d\n", value);
+        } break;
+        case Word: {
+           int16_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int16_t));
+           sb_appendf(out, "    mov rdi, %d\n", value);
+        } break;
+        case DWord: {
+           int32_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int32_t));
+           sb_appendf(out, "    mov rdi, %d\n", value);
+        } break;
+        case QWord: {
+           int64_t value;
+           memcpy(&value, &op.assign_loc.arg.value, sizeof(int64_t));
+           sb_appendf(out, "    mov rdi, %ld\n", value);
+        } break;
+    }
+
+    sb_appendf(out, "   call %s\n", op.routine_call.name);
+}
+
+void binary_operation(String_Builder* out, Op op) {
+    switch (op.binop.op) {
+        case Add: {
+            // TODO: Change moves depending on the size of the type
+            switch (op.binop.lhs.type) {
+                case Offset: sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", op.binop.lhs.offset); break;
+                case Byte: TODO("");
+                case Word: TODO("");
+                case DWord: TODO("");
+                case QWord: TODO("");
+            }
+
+            switch (op.binop.rhs.type) {
+                case Offset: sb_appendf(out, "    add rax, qword ptr [rbp - %zu]\n", op.binop.lhs.offset); break;
+                case Byte: TODO("");
+                case Word: TODO("");
+                case DWord: TODO("");
+                case QWord: TODO("");
+            }
+
+            sb_appendf(out, "   mov qword ptr [rbp - %zu], rax\n", op.binop.offset_dst);
+        }
+        default: TODO("");
+    } 
+}
+
+void assign_local(String_Builder* out, Op op) {
+    switch (op.assign_loc.arg.type) {
+        case Offset: {
+            sb_appendf(out, "   mov	rax, qword ptr [rbp - %zu]\n", op.assign_loc.arg.offset);
+            sb_appendf(out, "   mov	qword ptr [rbp - %zu], rax\n", op.assign_loc.offset_dst);
+        } break;
+        case Byte: TODO("");
+        case Word: TODO("");
+        case DWord: {
+            int32_t value;
+            memcpy(&value, &op.assign_loc.arg.value, sizeof(int32_t));
+            sb_appendf(out, "   mov	dword ptr [rbp - %zu], %d\n", op.assign_loc.offset_dst, value);
+        } break;
+        case QWord: TODO("");
+    }
 }
 
 bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
@@ -205,26 +304,9 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
         // TODO: Store only supports qwords
         switch (op.type) {
             case ReserveBytes: sb_appendf(out, "    sub rsp, %zu\n", op.reserve_bytes.bytes); break;
-            case StoreImmediate: sb_appendf(out, "    mov qword ptr [rsp + %zu], %d\n", op.store_imm.offset, op.store_imm.arg.four_bytes); break;
-            case StoreLocalVar: {
-                sb_appendf(out, "   mov	rax, qword ptr [rbp - %zu]\n", op.store_loc.offset_src);
-                sb_appendf(out, "   mov	qword ptr [rbp - %zu], rax\n", op.store_loc.offset_dst);
-	
-            } break;
-            case RoutineCall: {
-                if (op.routine_call.arg.type == LocalVar) {
-                    sb_appendf(out, "    mov rdi, qword ptr [rsp + %zu]\n", op.routine_call.arg.offset);
-                } else if (op.routine_call.arg.type == Literal) {
-                    // TODO Support other literals
-                    sb_appendf(out, "    mov rdi, %d\n", op.routine_call.arg.four_bytes);
-                } else {
-                    UNREACHABLE("");
-                }
-
-                sb_appendf(out, "    call %s\n", op.routine_call.name);
-            } break;
-            case LoadLocalVar: TODO("LoadLocalVar"); break;
-            case BinaryOperation: TODO("BinaryOperation"); break;
+            case BinaryOperation: binary_operation(out, op); break;
+            case RoutineCall: routine_call(out, op); break;
+            case AssignLocal: assign_local(out, op); break;
         }
     }
 

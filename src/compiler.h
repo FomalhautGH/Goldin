@@ -1,6 +1,7 @@
 #ifndef COMPILER_HEADER 
 #define COMPILER_HEADER
 
+#include "lexer.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -9,7 +10,7 @@
 #include "stb_ds.h"
 
 typedef struct {
-    enum { Byte, Word, DWord, QWord } size;
+    enum { Byte, Word, DWord, QWord, Offset } type;
     union { int64_t value; size_t offset; };
 } Arg;
 
@@ -29,25 +30,21 @@ typedef enum {
 typedef struct {
     enum {
         ReserveBytes,
-        LoadLocalVar,
-        StoreImmediate,
-        StoreLocalVar,
+        AssignLocal,
         RoutineCall,
         BinaryOperation
     } type;
 
     union {
         struct { size_t bytes; } reserve_bytes;
-        struct { size_t offset; } load_local;
-        struct { size_t offset_dst; Arg arg; } store_imm;
-        struct { size_t offset_dst; size_t offset_src; } store_loc;
+        struct { size_t offset_dst; Arg arg; } assign_loc;
         struct { const char* name; Arg arg; } routine_call;
-        struct { Binop op; Arg lhs; Arg rhs; } binop;
+        struct { size_t offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
     };
 } Op;
 
-#define OpStoreLocalVar(dst, src) (Op) {.type = StoreLocalVar, .store_loc = { dst, src }}
-#define OpStoreImmediate(dst, size, value) (Op) { .type = StoreImmediate, .store_imm = { dst, { size, { value } } } }
+#define OpAssignLocal(dst, src) (Op) {.type = AssignLocal, .assign_loc = { dst, src }}
+#define OpRoutineCall(name, arg) (Op) {.type = RoutineCall, .routine_call = { name, arg }}
 #define OpReserveBytes(bytes) (Op) {.type = ReserveBytes, .reserve_bytes = { bytes }}
 
 typedef struct {
