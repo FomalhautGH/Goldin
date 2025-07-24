@@ -10,8 +10,9 @@
 #include "stb_ds.h"
 
 typedef struct {
-    enum { Byte, Word, DWord, QWord, Offset } type;
-    union { int64_t value; size_t offset; };
+    enum { Byte, Word, DWord, QWord } size;
+    enum { Offset, Value } type;
+    union { int64_t buffer; size_t offset; };
 } Arg;
 
 typedef enum {
@@ -19,12 +20,6 @@ typedef enum {
     Sub,
     Mul,
     Div
-    // TODO: Pow
-    // LeftShift,
-    // RightShift,
-    // Xor,
-    // And,
-    // Or,
 } Binop;
 
 typedef struct {
@@ -32,20 +27,21 @@ typedef struct {
         ReserveBytes,
         AssignLocal,
         RoutineCall,
-        BinaryOperation
+        Binary
     } type;
 
     union {
         struct { size_t bytes; } reserve_bytes;
-        struct { size_t offset_dst; Arg arg; } assign_loc;
+        struct { Arg offset_dst; Arg arg; } assign_loc;
         struct { const char* name; Arg arg; } routine_call;
-        struct { size_t offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
+        struct { Arg offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
     };
 } Op;
 
 #define OpAssignLocal(dst, src) (Op) {.type = AssignLocal, .assign_loc = { dst, src }}
 #define OpRoutineCall(name, arg) (Op) {.type = RoutineCall, .routine_call = { name, arg }}
 #define OpReserveBytes(bytes) (Op) {.type = ReserveBytes, .reserve_bytes = { bytes }}
+#define OpBinary(dst, op, lhs, rhs) (Op) {.type = Binary, .binop = { dst, op, lhs, rhs }}
 
 typedef struct {
     const char* key;

@@ -16,6 +16,9 @@ const char* display_type(TokenType type) {
         case Equal: return "Equal";
         case Greater: return "Greater";
         case Less: return "Less";
+        case Plus: return "Plus";
+        case Minus: return "Minus";
+        case Star: return "Star";
         case VarTypei8: return "VarTypei8";
         case VarTypei16: return "VarTypei16";
         case VarTypei32: return "VarTypei32";

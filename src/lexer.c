@@ -173,6 +173,9 @@ bool next_token() {
         case '=': lexer.token_type = Equal; break;
         case '<': lexer.token_type = Less; break;
         case '/': lexer.token_type = Slash; break;
+        case '+': lexer.token_type = Plus; break;
+        case '-': lexer.token_type = Minus; break;
+        case '*': lexer.token_type = Star; break;
         case '"': parse_string(); break;
         default: {
             if (isalpha(peek_prev())) parse_identifier(); 
