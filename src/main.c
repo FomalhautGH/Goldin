@@ -1,6 +1,7 @@
 #include "token.h"
 #include "lexer.h"
 #include "compiler.h"
+#include "codegen.h"
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
@@ -40,14 +41,11 @@ int main(int argc, char** argv) {
     }
 
     init_compiler();
-
-    Op* ops = NULL;
-    if (!generate_ops(&ops)) exit(COMPILATION_ERROR);
-    dump_ops(ops);
+    if (!generate_ops()) exit(COMPILATION_ERROR);
 
     String_Builder result = {0};
+    Op* ops = get_ops();
     if (!generate_GAS_x86_64(&result, ops)) exit(GEN_ERROR);
-    arrfree(ops);
 
     String_Builder asm_file = {0};
     sb_appendf(&asm_file, "%s.asm", argv[file_name]);

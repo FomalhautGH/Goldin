@@ -2,6 +2,6 @@
 
 rt main() {
     i32 variable = 30;
-    putchar(variable + 10 + variable);
+    putchar(30 + 10 + variable);
     putchar(10);
 }

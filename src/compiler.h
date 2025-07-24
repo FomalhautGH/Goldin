@@ -49,12 +49,14 @@ typedef struct {
 } VarsHashMap;
 
 typedef struct {
+    Op* ops;
+    VarsHashMap* vars;
+    size_t offset;
 } Compiler;
 
 void init_compiler();
 void free_compiler();
-void dump_ops(Op* ops);
-bool generate_ops(Op* ops[]);
-bool generate_GAS_x86_64(String_Builder* out, Op* ops);
+bool generate_ops();
+Op* get_ops();
 
 #endif
