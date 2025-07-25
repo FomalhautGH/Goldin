@@ -44,6 +44,7 @@ int main(int argc, char** argv) {
     if (!generate_ops()) exit(COMPILATION_ERROR);
 
     String_Builder result = {0};
+
     Op* ops = get_ops();
     if (!generate_GAS_x86_64(&result, ops)) exit(GEN_ERROR);
 

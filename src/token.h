@@ -14,6 +14,7 @@ typedef enum {
     RightParen,
     LeftBracket,
     RightBracket,
+    While,
 
     VarTypei8,
     VarTypei16,

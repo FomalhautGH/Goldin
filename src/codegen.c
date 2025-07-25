@@ -1,4 +1,5 @@
 #include "codegen.h"
+#include "compiler.h"
 
 static int8_t get_byte(Arg arg) {
     int8_t result = 0;
@@ -56,7 +57,7 @@ static void routine_call(String_Builder* out, Op op) {
     sb_appendf(out, "    call %s\n", op.routine_call.name);
 }
 
-static void binary_operation_add_lhs_factor(String_Builder* out, Arg lhs) {
+static void binary_operation_load_lhs_factor(String_Builder* out, Arg lhs) {
     switch (lhs.type) {
         case Value:
             switch (lhs.size) {
@@ -78,7 +79,7 @@ static void binary_operation_add_lhs_factor(String_Builder* out, Arg lhs) {
     }
 }
 
-static void binary_operation_add_rhs_factor(String_Builder* out, Arg rhs) {
+static void binary_operation_load_add_rhs_factor(String_Builder* out, Arg rhs) {
     switch (rhs.type) {
         case Value:
             switch (rhs.size) {
@@ -99,8 +100,52 @@ static void binary_operation_add_rhs_factor(String_Builder* out, Arg rhs) {
         default: UNREACHABLE("Invalid Arg type");
     }
 }
-    
-static void binary_operation_add_dst(String_Builder* out, Arg dst) {
+
+static void binary_operation_load_sub_rhs_factor(String_Builder* out, Arg rhs) {
+    switch (rhs.type) {
+        case Value:
+            switch (rhs.size) {
+                case Byte: sb_appendf(out, "    sub al, %d\n", get_byte(rhs)); break;
+                case Word: sb_appendf(out, "    sub ax, %d\n", get_word(rhs)); break;
+                case DWord: sb_appendf(out, "    sub eax, %d\n", get_dword(rhs)); break;
+                case QWord: sb_appendf(out, "    sub rax, %ld\n", get_qword(rhs)); break;
+                default: UNREACHABLE("Invalid Arg size");
+            } break;
+        case Offset:
+            switch (rhs.size) {
+                case Byte: sb_appendf(out, "    sub al, byte ptr [rbp - %zu]\n", rhs.offset); break;
+                case Word: sb_appendf(out, "    sub ax, word ptr [rbp - %zu]\n", rhs.offset); break;
+                case DWord: sb_appendf(out, "    sub eax, dword ptr [rbp - %zu]\n", rhs.offset); break;
+                case QWord: sb_appendf(out, "    sub rax, qword ptr [rbp - %zu]\n", rhs.offset); break;
+                default: UNREACHABLE("Invalid Arg size");
+            } break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
+}
+
+static void binary_operation_load_mul_rhs_factor(String_Builder* out, Arg rhs) {
+    switch (rhs.type) {
+        case Value:
+            switch (rhs.size) {
+                case Byte: sb_appendf(out, "    imul al, %d\n", get_byte(rhs)); break;
+                case Word: sb_appendf(out, "    imul ax, %d\n", get_word(rhs)); break;
+                case DWord: sb_appendf(out, "    imul eax, %d\n", get_dword(rhs)); break;
+                case QWord: sb_appendf(out, "    imul rax, %ld\n", get_qword(rhs)); break;
+                default: UNREACHABLE("Invalid Arg size");
+            } break;
+        case Offset:
+            switch (rhs.size) {
+                case Byte: sb_appendf(out, "    imul al, byte ptr [rbp - %zu]\n", rhs.offset); break;
+                case Word: sb_appendf(out, "    imul ax, word ptr [rbp - %zu]\n", rhs.offset); break;
+                case DWord: sb_appendf(out, "    imul eax, dword ptr [rbp - %zu]\n", rhs.offset); break;
+                case QWord: sb_appendf(out, "    imul rax, qword ptr [rbp - %zu]\n", rhs.offset); break;
+                default: UNREACHABLE("Invalid Arg size");
+            } break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
+}
+
+static void binary_operation_load_dst(String_Builder* out, Arg dst) {
     switch (dst.type) {
         case Offset:
             switch (dst.size) {
@@ -122,9 +167,38 @@ static void binary_operation_add(String_Builder* out, Op op) {
     assert(lhs.size == rhs.size);
     assert(lhs.size == dst.size);
 
-    binary_operation_add_lhs_factor(out, lhs);
-    binary_operation_add_rhs_factor(out, rhs);
-    binary_operation_add_dst(out, dst);
+    binary_operation_load_lhs_factor(out, lhs);
+    binary_operation_load_add_rhs_factor(out, rhs);
+    binary_operation_load_dst(out, dst);
+}
+
+static void binary_operation_sub(String_Builder* out, Op op) {
+    Arg lhs = op.binop.lhs;
+    Arg rhs = op.binop.rhs;
+    Arg dst = op.binop.offset_dst;
+
+    // TODO: support typecheking in expressions in order to always have the same size
+    assert(lhs.size == rhs.size);
+    assert(lhs.size == dst.size);
+
+    binary_operation_load_lhs_factor(out, lhs);
+    binary_operation_load_sub_rhs_factor(out, rhs);
+    binary_operation_load_dst(out, dst);
+}
+
+static void binary_operation_mul(String_Builder* out, Op op) {
+    Arg lhs = op.binop.lhs;
+    Arg rhs = op.binop.rhs;
+    Arg dst = op.binop.offset_dst;
+
+    // TODO: support typecheking in expressions in order to always have the same size
+    assert(lhs.size == rhs.size);
+    assert(lhs.size == dst.size);
+
+    // TODO: Use imul with 3 arguments since it exists in x64
+    binary_operation_load_lhs_factor(out, lhs);
+    binary_operation_load_mul_rhs_factor(out, rhs);
+    binary_operation_load_dst(out, dst);
 }
 
 static void binary_operation(String_Builder* out, Op op) {
@@ -132,6 +206,8 @@ static void binary_operation(String_Builder* out, Op op) {
 
     switch (operation) {
         case Add: binary_operation_add(out, op); break;
+        case Sub: binary_operation_sub(out, op); break;
+        case Mul: binary_operation_mul(out, op); break;
         default: TODO("Binary operation unsupported yet");
     } 
 }
