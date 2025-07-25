@@ -2,8 +2,6 @@
 #define COMPILER_HEADER
 
 #include "lexer.h"
-#include <stddef.h>
-#include <stdint.h>
 
 #define NOB_STRIP_PREFIX
 #include "nob.h"
@@ -19,7 +17,8 @@ typedef enum {
     Add,
     Sub,
     Mul,
-    Div
+    Div,
+    LessThan
 } Binop;
 
 typedef struct {
@@ -27,7 +26,10 @@ typedef struct {
         ReserveBytes,
         AssignLocal,
         RoutineCall,
-        Binary
+        Binary,
+        Label,
+        JumpIfNot,
+        Jump
     } type;
 
     union {
@@ -35,6 +37,9 @@ typedef struct {
         struct { Arg offset_dst; Arg arg; } assign_loc;
         struct { const char* name; Arg arg; } routine_call;
         struct { Arg offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
+        struct { size_t label; Arg arg; } jump_if_not;
+        struct { size_t label; } jump;
+        struct { size_t index; } label;
     };
 } Op;
 
@@ -42,6 +47,9 @@ typedef struct {
 #define OpRoutineCall(name, arg) (Op) {.type = RoutineCall, .routine_call = { name, arg }}
 #define OpReserveBytes(bytes) (Op) {.type = ReserveBytes, .reserve_bytes = { bytes }}
 #define OpBinary(dst, op, lhs, rhs) (Op) {.type = Binary, .binop = { dst, op, lhs, rhs }}
+#define OpJumpIfNot(label, arg) (Op) {.type = JumpIfNot, .jump_if_not = { label, arg }}
+#define OpJump(label) (Op) {.type = Jump, .jump = { label }}
+#define OpLabel(index) (Op) {.type = Label, .label = { index }}
 
 typedef struct {
     const char* key;
@@ -52,6 +60,7 @@ typedef struct {
     Op* ops;
     VarsHashMap* vars;
     size_t offset;
+    size_t label_index;
 } Compiler;
 
 void init_compiler();

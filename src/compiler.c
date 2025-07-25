@@ -1,13 +1,19 @@
 #include "lexer.h"
 #include "token.h"
+#include "compiler.h"
+
+#include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include "compiler.h"
 
 static Compiler comp = {0};
 
-static void add_op(Op op) {
+static bool while_loop();
+
+static size_t push_op(Op op) {
+    size_t index = arrlenu(comp.ops);
     arrput(comp.ops, op);
+    return index;
 }
 
 static void offset_arg(Arg* arg_ptr, int size, size_t offset) {
@@ -31,6 +37,12 @@ static bool expect_type(TokenType type) {
 static bool consume_and_expect(TokenType type) {
     next_token();
     if (!expect_type(type)) return false; 
+    return true;
+}
+
+static bool expect_and_consume(TokenType type) {
+    if (!expect_type(type)) return false; 
+    next_token();
     return true;
 }
 
@@ -79,7 +91,7 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
 
                 Arg dst = {0};
                 offset_arg(&dst, DWord, comp.offset);
-                add_op(OpBinary(dst, Add, *arg, rhs));
+                push_op(OpBinary(dst, Add, *arg, rhs));
 
                 offset_arg(arg, DWord, comp.offset);
             } break;
@@ -93,7 +105,7 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
 
                 Arg dst = {0};
                 offset_arg(&dst, DWord, comp.offset);
-                add_op(OpBinary(dst, Sub, *arg, rhs));
+                push_op(OpBinary(dst, Sub, *arg, rhs));
 
                 offset_arg(arg, DWord, comp.offset);
             } break;
@@ -107,9 +119,23 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
 
                 Arg dst = {0};
                 offset_arg(&dst, DWord, comp.offset);
-                add_op(OpBinary(dst, Mul, *arg, rhs));
+                push_op(OpBinary(dst, Mul, *arg, rhs));
 
                 offset_arg(arg, DWord, comp.offset);
+            } break;
+            case Less: {
+                consume();
+                Arg rhs = {0};
+                compile_expression_wrapped(&rhs, Less);
+
+                // TODO: offset needs to change based off the type of the expression not simply 4
+                comp.offset += 4;
+
+                Arg dst = {0};
+                offset_arg(&dst, Byte, comp.offset);
+                push_op(OpBinary(dst, LessThan, *arg, rhs));
+
+                offset_arg(arg, Byte, comp.offset);
             } break;
             case Slash: TODO("Unsupported div op"); break;
             default: goto end_expr;
@@ -162,10 +188,10 @@ static bool variable_declaration(TokenType var_type) {
 
         Arg dst = {0};
         offset_arg(&dst, DWord, current_offset);
-        add_op(OpAssignLocal(dst, arg));
+        push_op(OpAssignLocal(dst, arg));
     }
 
-    if (!expect_type(SemiColon)) return false;
+    if (!expect_and_consume(SemiColon)) return false;
     return true;
 }
 
@@ -174,7 +200,7 @@ static bool routine(const char* name) {
 
     Arg arg = {0};
     if (!compile_expression(&arg)) return false;
-    add_op(OpRoutineCall(name, arg));
+    push_op(OpRoutineCall(name, arg));
 
     if (!expect_type(RightParen)) return false;
     if (!consume_and_expect(SemiColon)) return false;
@@ -191,7 +217,7 @@ static bool assignment(const char* name) {
     Arg dst = {0};
     size_t offset = shget(comp.vars, name);
     offset_arg(&dst, DWord, offset);
-    add_op(OpAssignLocal(dst, arg));
+    push_op(OpAssignLocal(dst, arg));
     return true;
 }
 
@@ -213,6 +239,74 @@ static bool identifier() {
     return true;
 }
 
+static bool statement() {
+    switch (get_type()) {
+        case VarTypei8:
+        case VarTypei16:
+        case VarTypei32:
+        case VarTypei64:
+        case VarTypeu8:
+        case VarTypeu16:
+        case VarTypeu32:
+        case VarTypeu64:
+        case VarTypef32:
+        case VarTypef64: if (!variable_declaration(get_type())) return false; break;
+
+        case Identifier: if (!identifier()) return false; break;
+        case While: if (!while_loop()) return false; break;
+        case SemiColon: consume(); return true;
+
+        case Eof:
+            error_msg("COMPILATION ERROR: Expected ';' after statement");
+            return false;
+
+        default:
+            printf("%s\n", display_type(get_token().type));
+            error_msg("COMPILATION ERROR: Unsupported token type in statement");
+            return false;
+                 
+    }
+
+    return true;
+}
+
+static bool block() {
+    if (!expect_and_consume(LeftBracket)) return false;
+
+    while (get_type() != RightBracket) {
+        if (!statement()) return false;
+    }
+
+    if (!expect_and_consume(RightBracket)) return false;
+    return true;
+}
+
+static size_t push_label_op() {
+    size_t index = comp.label_index;
+    push_op(OpLabel(index));
+
+    comp.label_index += 1;
+
+    return index;
+}
+
+static bool while_loop() {
+    if (!consume_and_expect(LeftParen)) return false;
+    consume();
+
+    size_t start_loop = push_label_op();
+    Arg cond = {0};
+    if (!compile_expression(&cond)) return false;
+    if (!expect_and_consume(RightParen)) return false;
+    size_t jmpifnot = push_op(OpJumpIfNot(0, cond));
+    if (!block()) return false;
+
+    push_op(OpJump(start_loop));
+    comp.ops[jmpifnot].jump_if_not.label = push_label_op();
+
+    return true;
+}
+
 static bool compile_routine_body() {
     consume();
     if (strcmp(get_value().items, "main") != 0) {
@@ -223,52 +317,19 @@ static bool compile_routine_body() {
     // TODO: function arguments
     if (!consume_and_expect(LeftParen)) return false;
     if (!consume_and_expect(RightParen)) return false;
-    if (!consume_and_expect(LeftBracket)) return false;
+    consume();
+    if (!block()) return false;
 
-    while (true) {
-        consume();
-        switch (get_type()) {
-            case VarTypei8:
-            case VarTypei16:
-            case VarTypei32:
-            case VarTypei64:
-            case VarTypeu8:
-            case VarTypeu16:
-            case VarTypeu32:
-            case VarTypeu64:
-            case VarTypef32:
-            case VarTypef64: if (!variable_declaration(get_type())) return false; break;
-
-            // TODO: Only routines call for now and no arity checked
-            case Identifier: if (!identifier()) return false; break;
-
-            case RightBracket: {
-                reserve_bytes();
-                consume();
-                return true;
-            } break;
-
-            case Eof: {
-                error_msg("COMPILATION ERROR: Expected '}' after routine body");
-                return false;
-            } break;
-
-            default: {
-                printf("%s\n", display_type(get_token().type));
-                error_msg("COMPILATION ERROR: Unsupported token type in routine");
-                return false;
-            }
-        }
-    }
-
-    return false;
+    reserve_bytes();
+    return true;
 }
 
 void init_compiler() {
     comp.offset = 0;
+    comp.label_index = 0;
     comp.ops = NULL;
 
-    // TODO: Can this pointer change in functions?
+    // TODO: Change hashtable depending on the scope
     comp.vars = NULL;
     shdefault(comp.vars, -1);
 }
