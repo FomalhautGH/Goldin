@@ -1,7 +1,8 @@
 // Types and assignment
 
 rt main() {
-    i32 variable = 15 * 2 + 5 * 6 + 10;
+    i32 variable = 30;
+    variable = 70;
     putchar(variable);
     putchar(10);
 }

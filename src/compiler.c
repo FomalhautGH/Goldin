@@ -1,6 +1,7 @@
 #include "lexer.h"
 #include "token.h"
 #include <stddef.h>
+#include <string.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
@@ -168,10 +169,8 @@ static bool variable_declaration(TokenType var_type) {
     return true;
 }
 
-static bool routine() {
-    const char* name = strdup(get_value().items);
-    if (!consume_and_expect(LeftParen)) return false;
-    consume();
+static bool routine(const char* name) {
+    consume(); // consume '('
 
     Arg arg = {0};
     if (!compile_expression(&arg)) return false;
@@ -183,8 +182,35 @@ static bool routine() {
     return true;
 }
 
+static bool assignment(const char* name) {
+    consume(); // consume '='
+
+    Arg arg = {0};
+    if (!compile_expression(&arg)) return false;
+
+    Arg dst = {0};
+    size_t offset = shget(comp.vars, name);
+    offset_arg(&dst, DWord, offset);
+    add_op(OpAssignLocal(dst, arg));
+    return true;
+}
+
 static void reserve_bytes() {
     if (comp.offset > 0) arrins(comp.ops, 0, OpReserveBytes(comp.offset)); 
+}
+
+static bool identifier() {
+    const char* name = strdup(get_value().items);
+    consume();
+
+    switch (get_type()) {
+        case Equal: return assignment(name);
+        case LeftParen: return routine(name); 
+        case SemiColon: consume(); break;
+        default: error_msg("COMPILATION ERROR: Unexpected token after identifier"); return false;
+    }
+
+    return true;
 }
 
 static bool compile_routine_body() {
@@ -213,8 +239,8 @@ static bool compile_routine_body() {
             case VarTypef32:
             case VarTypef64: if (!variable_declaration(get_type())) return false; break;
 
-             // TODO: Only routines call for now and no arity checked
-            case Identifier: if (!routine()) return false; break;
+            // TODO: Only routines call for now and no arity checked
+            case Identifier: if (!identifier()) return false; break;
 
             case RightBracket: {
                 reserve_bytes();
