@@ -2,13 +2,10 @@
 #include "token.h"
 #include "compiler.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <string.h>
-
 static Compiler comp = {0};
 
 static bool while_loop();
+static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
 static size_t push_op(Op op) {
     size_t index = arrlenu(comp.ops);
@@ -22,8 +19,10 @@ static void offset_arg(Arg* arg_ptr, int size, size_t offset) {
     arg_ptr->offset = offset;
 }
 
-static bool consume() {
-    return next_token();
+static Token consume() {
+    Token res = get_token();
+    next_token(); // check bool
+    return res;
 }
 
 static bool expect_type(TokenType type) {
@@ -34,131 +33,24 @@ static bool expect_type(TokenType type) {
     return true;
 }
 
-static bool consume_and_expect(TokenType type) {
-    next_token();
-    if (!expect_type(type)) return false; 
-    return true;
-}
-
 static bool expect_and_consume(TokenType type) {
     if (!expect_type(type)) return false; 
     next_token();
     return true;
 }
 
-static void int_literal_to_arg(Arg* arg) {
-    // TODO: Check errno in convertions and overflow if literal too big
-    int32_t value = strtol(get_value().items, NULL, 10);
-    arg->size = DWord;
-    arg->type = Value;
-    memcpy(&arg->buffer, &value, sizeof(int32_t));
+static const char* expect_consume_id_and_get_string() {
+    if (!expect_type(Identifier)) return NULL; 
+    const char* result = strdup(get_value().items);
+    next_token();
+    return result;
 }
 
-static void var_id_to_arg(Arg* arg) {
-    const char* name = get_value().items;
-    size_t offset = shget(comp.vars, name);
-    offset_arg(arg, DWord, offset);
+static long find_var_offset(const char* name) {
+    return shget(comp.vars, name);
 }
 
-static bool compile_primary_expression(Arg* arg) {
-
-    switch (get_type()) {
-        case Identifier: var_id_to_arg(arg); consume(); break;
-        case IntLiteral: int_literal_to_arg(arg); consume(); break;
-        case LeftParen: TODO("Groupings unsupported yet"); break;
-        case RealLiteral: TODO("Floats unsupported yet"); break;
-        case StringLiteral: TODO("String usopported yet"); break;
-        default: UNREACHABLE("Unsupported token type in primary expression");
-    }
-
-    return true;
-}
-
-// TODO: change tokentype to a type that represents binding powers more effectively
-static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
-    // TODO: Pratt parser?
-    compile_primary_expression(arg);
-
-    while (get_type() > min_binding) {
-        switch (get_type()) {
-            case Plus: {
-                consume();
-                Arg rhs = {0};
-                compile_expression_wrapped(&rhs, Plus);
-
-                // TODO: offset needs to change based off the type of the expression not simply 4
-                comp.offset += 4;
-
-                Arg dst = {0};
-                offset_arg(&dst, DWord, comp.offset);
-                push_op(OpBinary(dst, Add, *arg, rhs));
-
-                offset_arg(arg, DWord, comp.offset);
-            } break;
-            case Minus: {
-                consume();
-                Arg rhs = {0};
-                compile_expression_wrapped(&rhs, Minus);
-
-                // TODO: offset needs to change based off the type of the expression not simply 4
-                comp.offset += 4;
-
-                Arg dst = {0};
-                offset_arg(&dst, DWord, comp.offset);
-                push_op(OpBinary(dst, Sub, *arg, rhs));
-
-                offset_arg(arg, DWord, comp.offset);
-            } break;
-            case Star: {
-                consume();
-                Arg rhs = {0};
-                compile_expression_wrapped(&rhs, Star);
-
-                // TODO: offset needs to change based off the type of the expression not simply 4
-                comp.offset += 4;
-
-                Arg dst = {0};
-                offset_arg(&dst, DWord, comp.offset);
-                push_op(OpBinary(dst, Mul, *arg, rhs));
-
-                offset_arg(arg, DWord, comp.offset);
-            } break;
-            case Less: {
-                consume();
-                Arg rhs = {0};
-                compile_expression_wrapped(&rhs, Less);
-
-                // TODO: offset needs to change based off the type of the expression not simply 4
-                comp.offset += 4;
-
-                Arg dst = {0};
-                offset_arg(&dst, Byte, comp.offset);
-                push_op(OpBinary(dst, LessThan, *arg, rhs));
-
-                offset_arg(arg, Byte, comp.offset);
-            } break;
-            case Slash: TODO("Unsupported div op"); break;
-            default: goto end_expr;
-        }
-    }
-
-end_expr:
-    return true;
-}
-
-static bool compile_expression(Arg* arg) {
-    return compile_expression_wrapped(arg, 0);
-}
-
-static bool variable_declaration(TokenType var_type) {
-    if (!consume_and_expect(Identifier)) return false;
-    const char* var_name = strdup(get_value().items);
-
-    if (shget(comp.vars, var_name) != -1) {
-        error_msg("COMPILATION ERROR: Redefinition of variable");
-        return false;
-    }
-
+static bool declare_variable(TokenType var_type, const char* name) {
     switch (var_type) {
         case VarTypeu8:
         case VarTypei8: comp.offset += 1; break;
@@ -176,63 +68,174 @@ static bool variable_declaration(TokenType var_type) {
         default: UNREACHABLE("Not a valid var type");
     }
 
-    shput(comp.vars, var_name, comp.offset);
+    shput(comp.vars, name, comp.offset);
+    return true;
+}
+
+static void print_current_type() {
+    printf("%s\n", display_type(get_type()));
+}
+
+static void int_literal_to_arg(Arg* arg) {
+    // TODO: Check errno in convertions and overflow if literal too big
+    int32_t value = strtol(get_value().items, NULL, 10);
+    arg->size = DWord;
+    arg->type = Value;
+    memcpy(&arg->buffer, &value, sizeof(int32_t));
+    consume();
+}
+
+static bool var_id_to_arg(Arg* arg) {
+    const char* name = get_value().items;
+    long offset = find_var_offset(name);
+    
+    if (offset == -1) {
+        error_msg("COMPILATION ERROR: Usage of undefined variable");
+        return false;
+    }
+    
+    offset_arg(arg, DWord, offset);
+    consume();
+    return true;
+}
+
+static bool compile_binop(Arg* arg, int size) {
+    Arg rhs = {0};
+    Arg dst = {0};
+    TokenType type = get_type();
 
     consume();
-    if (get_type() == Equal) {
-        consume();
-        size_t current_offset = comp.offset;
 
-        Arg arg = {0};
-        if (!compile_expression(&arg)) return false;
-
-        Arg dst = {0};
-        offset_arg(&dst, DWord, current_offset);
-        push_op(OpAssignLocal(dst, arg));
+    Binop binop = 0;
+    switch (type) {
+        case Plus: binop = Add; break;
+        case Minus: binop = Sub; break;
+        case Star: binop = Mul; break;
+        case Slash: binop = Div; break;
+        case Less: binop = LessThan; break;
+        default: UNREACHABLE("");
     }
 
+    if (!compile_expression_wrapped(&rhs, type)) return false;
+
+    // TODO: offset needs to change based off the type of the expression not simply 4
+    comp.offset += 4;
+
+    offset_arg(&dst, size, comp.offset);
+    push_op(OpBinary(dst, binop, *arg, rhs));
+
+    offset_arg(arg, size, comp.offset);
+    return true;
+}
+
+static bool compile_primary_expression(Arg* arg) {
+    switch (get_type()) {
+        case Identifier: return var_id_to_arg(arg);
+        case IntLiteral: int_literal_to_arg(arg); break;
+        case LeftParen: TODO("Groupings unsupported yet"); break;
+        case RealLiteral: TODO("Floats unsupported yet"); break;
+        case StringLiteral: TODO("String usopported yet"); break;
+        default: error_msg("COMPILATION ERROR: Expected expression"); return false;
+    }
+    return true;
+}
+
+// TODO: change tokentype to a type that represents binding powers more effectively
+static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
+    if (!compile_primary_expression(arg)) return false;
+
+    while (get_type() > min_binding) {
+        switch (get_type()) {
+            case Plus: 
+            case Minus: 
+            case Star: return compile_binop(arg, DWord);
+            case Less: return compile_binop(arg, Byte);
+            case Slash: TODO("Unsupported div op"); break;
+            default: goto end_expr;
+        }
+    }
+
+end_expr:
+    return true;
+}
+
+static bool compile_expression(Arg* arg) {
+    return compile_expression_wrapped(arg, 0);
+}
+
+static bool variable_initialization() {
+    Arg arg = {0};
+    Arg dst = {0};
+
+    size_t current_offset = comp.offset;
+    if (!compile_expression(&arg)) return false;
+    offset_arg(&dst, DWord, current_offset);
+    push_op(OpAssignLocal(dst, arg));
+
+    expect_and_consume(SemiColon);
+    return true;
+}
+
+static bool variable_declaration() {
+    TokenType var_type = get_type();
+
+    consume();
+    const char* var_name = expect_consume_id_and_get_string();
+    if (find_var_offset(var_name) != -1) {
+        error_msg("COMPILATION ERROR: Redefinition of variable");
+        free((void*)var_name);
+        return false;
+    }
+
+    if (!declare_variable(var_type, var_name)) return false;
+
+    switch (consume().type) {
+        case Equal: return variable_initialization();
+        case SemiColon: return true;
+        default: {
+            error_msg("COMPILATION ERROR: Expected ';' after variable declaration");
+        } return false;
+    }
+
+    UNREACHABLE("");
+}
+
+static bool routine_call(const char* name) {
+    Arg arg = {0};
+
+    if (!compile_expression(&arg)) return false;
+    push_op(OpRoutineCall(name, arg));
+
+    if (!expect_and_consume(RightParen)) return false;
     if (!expect_and_consume(SemiColon)) return false;
     return true;
 }
 
-static bool routine(const char* name) {
-    consume(); // consume '('
-
-    Arg arg = {0};
-    if (!compile_expression(&arg)) return false;
-    push_op(OpRoutineCall(name, arg));
-
-    if (!expect_type(RightParen)) return false;
-    if (!consume_and_expect(SemiColon)) return false;
-
-    return true;
-}
-
 static bool assignment(const char* name) {
-    consume(); // consume '='
-
     Arg arg = {0};
+    Arg dst = {0};
+
     if (!compile_expression(&arg)) return false;
 
-    Arg dst = {0};
-    size_t offset = shget(comp.vars, name);
+    long offset = find_var_offset(name);
+    if (offset == -1) {
+        error_msg("COMPILATION ERROR: Trying to assign to a non existing variable");
+        return false;
+    }
+
     offset_arg(&dst, DWord, offset);
     push_op(OpAssignLocal(dst, arg));
+    free((void*)name);
     return true;
-}
-
-static void reserve_bytes() {
-    if (comp.offset > 0) arrins(comp.ops, 0, OpReserveBytes(comp.offset)); 
 }
 
 static bool identifier() {
-    const char* name = strdup(get_value().items);
-    consume();
+    const char* name = expect_consume_id_and_get_string();
 
-    switch (get_type()) {
+    switch (consume().type) {
         case Equal: return assignment(name);
-        case LeftParen: return routine(name); 
-        case SemiColon: consume(); break;
+        case LeftParen: return routine_call(name); 
+        case SemiColon: break;
         default: error_msg("COMPILATION ERROR: Unexpected token after identifier"); return false;
     }
 
@@ -250,7 +253,7 @@ static bool statement() {
         case VarTypeu32:
         case VarTypeu64:
         case VarTypef32:
-        case VarTypef64: if (!variable_declaration(get_type())) return false; break;
+        case VarTypef64: if (!variable_declaration()) return false; break;
 
         case Identifier: if (!identifier()) return false; break;
         case While: if (!while_loop()) return false; break;
@@ -291,11 +294,12 @@ static size_t push_label_op() {
 }
 
 static bool while_loop() {
-    if (!consume_and_expect(LeftParen)) return false;
+    Arg cond = {0};
+
     consume();
+    if (!expect_and_consume(LeftParen)) return false;
 
     size_t start_loop = push_label_op();
-    Arg cond = {0};
     if (!compile_expression(&cond)) return false;
     if (!expect_and_consume(RightParen)) return false;
     size_t jmpifnot = push_op(OpJumpIfNot(0, cond));
@@ -308,19 +312,21 @@ static bool while_loop() {
 }
 
 static bool compile_routine_body() {
-    consume();
     if (strcmp(get_value().items, "main") != 0) {
         error_msg("COMPILATION ERROR: Only main function supported right now");
         return false;
     }
 
-    // TODO: function arguments
-    if (!consume_and_expect(LeftParen)) return false;
-    if (!consume_and_expect(RightParen)) return false;
     consume();
+
+    size_t reserve = push_op(OpReserveBytes(0));
+
+    if (!expect_and_consume(LeftParen)) return false;
+    // TODO: function arguments
+    if (!expect_and_consume(RightParen)) return false;
     if (!block()) return false;
 
-    reserve_bytes();
+    comp.ops[reserve].reserve_bytes.bytes = comp.offset;
     return true;
 }
 
@@ -344,9 +350,11 @@ Op* get_ops() {
 }
 
 bool generate_ops() {
+    consume();
+
     while (true) {
-        consume();
-        switch (get_token().type) {
+        Token current_token = consume();
+        switch (current_token.type) {
             case Eof: return true;
             case ParseError: return false;
             case Routine: return compile_routine_body();

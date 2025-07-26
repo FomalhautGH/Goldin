@@ -353,7 +353,8 @@ static void assign_local(String_Builder* out, Op op) {
 }
 
 static void reserve_bytes(String_Builder* out, Op op) {
-    sb_appendf(out, "    sub rsp, %zu\n", op.reserve_bytes.bytes);
+    if (op.reserve_bytes.bytes > 0)
+        sb_appendf(out, "    sub rsp, %zu\n", op.reserve_bytes.bytes);
 }
 
 static void function_prolog(String_Builder* out, const char* name) {

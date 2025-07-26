@@ -18,7 +18,7 @@ typedef enum {
     Sub,
     Mul,
     Div,
-    LessThan
+    LessThan,
 } Binop;
 
 typedef struct {

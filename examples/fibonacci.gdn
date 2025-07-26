@@ -8,7 +8,7 @@ rt main() {
     while (i < 15) {
         i32 c = a + b;
 
-        println(c);
+        // printf("%d\n", c);
 
         a = b;
         b = c;
