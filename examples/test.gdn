@@ -1,4 +1,11 @@
 
 rt main() {
-    i32 a = 5;
+    i32 counter = 65;
+    i32 newline = 10;
+
+    while (counter < 91) {
+        putchar(counter);
+        putchar(newline);
+        counter = counter + 1;
+    }
 }

@@ -1,9 +1,12 @@
 #include "lexer.h"
 #include "token.h"
+#include <stddef.h>
+#include <stdio.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
 
+static bool block();
 static bool while_loop();
 static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
@@ -47,7 +50,14 @@ static const char* expect_consume_id_and_get_string() {
 }
 
 static long find_var_offset(const char* name) {
-    return shget(comp.vars, name);
+    size_t last = arrlenu(comp.local_vars) - 1;
+
+    for (long i = last; i >= 0; --i) {
+        long index = shgeti(comp.local_vars[i], name);
+        if (index != -1) return comp.local_vars[i][index].value;
+    }
+
+    return -1;
 }
 
 static bool declare_variable(TokenType var_type, const char* name) {
@@ -68,7 +78,8 @@ static bool declare_variable(TokenType var_type, const char* name) {
         default: UNREACHABLE("Not a valid var type");
     }
 
-    shput(comp.vars, name, comp.offset);
+    size_t last = arrlenu(comp.local_vars) - 1;
+    shput(comp.local_vars[last], name, comp.offset);
     return true;
 }
 
@@ -257,7 +268,8 @@ static bool statement() {
 
         case Identifier: if (!identifier()) return false; break;
         case While: if (!while_loop()) return false; break;
-        case SemiColon: consume(); return true;
+        case SemiColon: consume(); return true; break;
+        case LeftBracket: if (!block()) return false; break;
 
         case Eof:
             error_msg("COMPILATION ERROR: Expected ';' after statement");
@@ -275,11 +287,13 @@ static bool statement() {
 
 static bool block() {
     if (!expect_and_consume(LeftBracket)) return false;
+    arrput(comp.local_vars, NULL);
 
     while (get_type() != RightBracket) {
         if (!statement()) return false;
     }
 
+    arrpop(comp.local_vars);
     if (!expect_and_consume(RightBracket)) return false;
     return true;
 }
@@ -334,14 +348,12 @@ void init_compiler() {
     comp.offset = 0;
     comp.label_index = 0;
     comp.ops = NULL;
-
-    // TODO: Change hashtable depending on the scope
-    comp.vars = NULL;
-    shdefault(comp.vars, -1);
+    comp.local_vars = NULL;
 }
 
 void free_compiler() {
-    shfree(comp.vars);
+    for (size_t i = 0; i < arrlenu(comp.local_vars); ++i) shfree(comp.local_vars[i]);
+    arrfree(comp.local_vars);
     arrfree(comp.ops);
 }
 

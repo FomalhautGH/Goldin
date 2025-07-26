@@ -54,11 +54,11 @@ typedef struct {
 typedef struct {
     const char* key;
     int value;
-} VarsHashMap;
+} VarsHashmap;
 
 typedef struct {
     Op* ops;
-    VarsHashMap* vars;
+    VarsHashmap** local_vars;
     size_t offset;
     size_t label_index;
 } Compiler;
