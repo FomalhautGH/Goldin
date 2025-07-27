@@ -1,7 +1,6 @@
 #include "lexer.h"
 #include "token.h"
-#include <stddef.h>
-#include <stdio.h>
+#include <string.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
@@ -16,10 +15,10 @@ static size_t push_op(Op op) {
     return index;
 }
 
-static void offset_arg(Arg* arg_ptr, int size, size_t offset) {
+static void position_arg(Arg* arg_ptr, int size, size_t position) {
     arg_ptr->size = size;
-    arg_ptr->type = Offset;
-    arg_ptr->offset = offset;
+    arg_ptr->type = Position;
+    arg_ptr->position = position;
 }
 
 static Token consume() {
@@ -53,7 +52,7 @@ static bool is_eof() {
     return get_type() == Eof;
 }
 
-static long find_var_offset(const char* name) {
+static long find_var_position(const char* name) {
     size_t last = arrlenu(comp.local_vars) - 1;
 
     for (long i = last; i >= 0; --i) {
@@ -67,23 +66,23 @@ static long find_var_offset(const char* name) {
 static bool declare_variable(TokenType var_type, const char* name) {
     switch (var_type) {
         case VarTypeu8:
-        case VarTypei8: comp.offset += 1; break;
+        case VarTypei8: comp.position += 1; break;
 
         case VarTypeu16:
-        case VarTypei16: comp.offset += 2; break;
+        case VarTypei16: comp.position += 2; break;
         case VarTypef32: TODO("Float not supported yet");
         case VarTypeu32:
-        case VarTypei32: comp.offset += 4; break;
+        case VarTypei32: comp.position += 4; break;
 
         case VarTypef64: TODO("Double not supported yet");
         case VarTypeu64:
-        case VarTypei64: comp.offset += 8; break;
+        case VarTypei64: comp.position += 8; break;
 
         default: UNREACHABLE("Not a valid var type");
     }
 
     size_t last = arrlenu(comp.local_vars) - 1;
-    shput(comp.local_vars[last], name, comp.offset);
+    shput(comp.local_vars[last], name, comp.position);
     return true;
 }
 
@@ -91,25 +90,27 @@ static void print_current_type() {
     printf("%s\n", display_type(get_type()));
 }
 
-static void int_literal_to_arg(Arg* arg) {
+static bool int_literal_to_arg(Arg* arg) {
     // TODO: Check errno in convertions and overflow if literal too big
     int32_t value = strtol(get_value().items, NULL, 10);
     arg->size = DWord;
     arg->type = Value;
     memcpy(&arg->buffer, &value, sizeof(int32_t));
     consume();
+
+    return true;
 }
 
 static bool var_id_to_arg(Arg* arg) {
     const char* name = get_value().items;
-    long offset = find_var_offset(name);
+    long position = find_var_position(name);
     
-    if (offset == -1) {
+    if (position == -1) {
         error_msg("COMPILATION ERROR: Usage of undefined variable");
         return false;
     }
     
-    offset_arg(arg, DWord, offset);
+    position_arg(arg, DWord, position);
     consume();
     return true;
 }
@@ -133,23 +134,38 @@ static bool compile_binop(Arg* arg, int size) {
 
     if (!compile_expression_wrapped(&rhs, type)) return false;
 
-    // TODO: offset needs to change based off the type of the expression not simply 4
-    comp.offset += 4;
+    // TODO: position needs to change based off the type of the expression not simply 4
+    comp.position += 4;
 
-    offset_arg(&dst, size, comp.offset);
+    position_arg(&dst, size, comp.position);
     push_op(OpBinary(dst, binop, *arg, rhs));
 
-    offset_arg(arg, size, comp.offset);
+    position_arg(arg, size, comp.position);
+    return true;
+}
+
+static bool string_literal_to_arg(Arg* arg) {
+    arg->size = QWord;
+    arg->type = Offset;
+    arg->position = arrlenu(comp.data);
+
+    Arg data = {0};
+    data.size = QWord;
+    data.type = Offset;
+    data.string = strdup(get_value().items);
+    arrpush(comp.data, data);
+
+    consume();
     return true;
 }
 
 static bool compile_primary_expression(Arg* arg) {
     switch (get_type()) {
         case Identifier: return var_id_to_arg(arg);
-        case IntLiteral: int_literal_to_arg(arg); break;
+        case IntLiteral: return int_literal_to_arg(arg);
+        case StringLiteral: return string_literal_to_arg(arg);
         case LeftParen: TODO("Groupings unsupported yet"); break;
         case RealLiteral: TODO("Floats unsupported yet"); break;
-        case StringLiteral: TODO("String usopported yet"); break;
         default: error_msg("COMPILATION ERROR: Expected expression"); return false;
     }
     return true;
@@ -183,9 +199,9 @@ static bool variable_initialization() {
     Arg dst = {0};
     consume();
 
-    size_t current_offset = comp.offset;
+    size_t current_position = comp.position;
     if (!compile_expression(&arg)) return false;
-    offset_arg(&dst, DWord, current_offset);
+    position_arg(&dst, DWord, current_position);
     push_op(OpAssignLocal(dst, arg));
 
     expect_and_consume(SemiColon);
@@ -197,7 +213,7 @@ static bool variable_declaration() {
 
     consume();
     const char* var_name = expect_consume_id_and_get_string();
-    if (find_var_offset(var_name) != -1) {
+    if (find_var_position(var_name) != -1) {
         error_msg("COMPILATION ERROR: Redefinition of variable");
         free((void*)var_name);
         return false;
@@ -218,11 +234,28 @@ static bool variable_declaration() {
 
 static bool routine_call(const char* name) {
     Arg arg = {0};
+    Arg* args = NULL;
     consume();
 
-    if (!compile_expression(&arg)) return false;
-    push_op(OpRoutineCall(name, arg));
+    while (!is_eof() && get_type() != RightParen) {
+        if (!compile_expression(&arg)) return false;
+        arrput(args, arg);
 
+        switch (get_type()) {
+            case RightParen: continue;
+            case Comma: consume(); continue;
+            default:
+                error_msg("COMPILATION ERROR: Unknown Token in routine arguments");
+                return false;
+        }
+    }
+
+    if (arrlenu(args) > 6) {
+        error_msg("COMPILATION ERROR: We only support 6 arguments for now");
+        return false;
+    }
+
+    push_op(OpRoutineCall(name, args));
     if (!expect_and_consume(RightParen)) return false;
     if (!expect_and_consume(SemiColon)) return false;
     return true;
@@ -235,13 +268,13 @@ static bool assignment(const char* name) {
 
     if (!compile_expression(&arg)) return false;
 
-    long offset = find_var_offset(name);
-    if (offset == -1) {
+    long position = find_var_position(name);
+    if (position == -1) {
         error_msg("COMPILATION ERROR: Trying to assign to a non existing variable");
         return false;
     }
 
-    offset_arg(&dst, DWord, offset);
+    position_arg(&dst, DWord, position);
     push_op(OpAssignLocal(dst, arg));
     free((void*)name);
     return true;
@@ -347,25 +380,31 @@ static bool compile_routine_body() {
     if (!expect_and_consume(RightParen)) return false;
     if (!block()) return false;
 
-    comp.ops[reserve].reserve_bytes.bytes = comp.offset;
+    comp.ops[reserve].reserve_bytes.bytes = comp.position;
     return true;
 }
 
 void init_compiler() {
-    comp.offset = 0;
+    comp.position = 0;
     comp.label_index = 0;
+    comp.data = NULL;
     comp.ops = NULL;
     comp.local_vars = NULL;
 }
 
 void free_compiler() {
     for (size_t i = 0; i < arrlenu(comp.local_vars); ++i) shfree(comp.local_vars[i]);
-    arrfree(comp.local_vars);
+    arrfree(comp.data);
     arrfree(comp.ops);
+    arrfree(comp.local_vars);
 }
 
 Op* get_ops() {
     return comp.ops;
+}
+
+Arg* get_data() {
+    return comp.data;
 }
 
 bool generate_ops() {

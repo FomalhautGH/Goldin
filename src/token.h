@@ -9,6 +9,7 @@ typedef enum {
     ParseError,
     Routine,
     Return,
+    Comma,
     SemiColon,
     LeftParen,
     RightParen,

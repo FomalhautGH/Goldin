@@ -1,6 +1,16 @@
 #include "codegen.h"
 #include "compiler.h"
 #include "token.h"
+#include <assert.h>
+
+static const char* x86_64_linux_call_registers[6][4] = {
+    {"dil", "di", "edi", "rdi"},
+    {"sil", "si", "esi", "rsi"},
+    {"dl",  "dx", "edx", "rdx"},
+    {"cl",  "cx", "ecx", "rcx"},
+    {"r8b", "r8w", "r8d", "r8"},
+    {"r9b", "r9w", "r9d", "r9"}
+};
 
 static int8_t get_byte(Arg arg) {
     int8_t result = 0;
@@ -26,35 +36,45 @@ static int64_t get_qword(Arg arg) {
     return result;
 }
 
-static void routine_call_arg_value(String_Builder* out, Arg arg) {
+static void routine_call_arg_value(String_Builder* out, Arg arg, size_t reg_index) {
     switch (arg.size) {
-        case Byte: sb_appendf(out, "    mov dil, %d\n", get_byte(arg)); break;
-        case Word: sb_appendf(out, "    mov di, %d\n", get_word(arg)); break;
-        case DWord: sb_appendf(out, "    mov edi, %d\n", get_dword(arg)); break;
-        case QWord: sb_appendf(out, "    mov rdi, %ld\n", get_qword(arg)); break;
+        case Byte: sb_appendf(out, "    mov %s, %d\n", x86_64_linux_call_registers[reg_index][Byte], get_byte(arg)); break;
+        case Word: sb_appendf(out, "    mov %s, %d\n", x86_64_linux_call_registers[reg_index][Word], get_word(arg)); break;
+        case DWord: sb_appendf(out, "    mov %s, %d\n", x86_64_linux_call_registers[reg_index][DWord], get_dword(arg)); break;
+        case QWord: sb_appendf(out, "    mov %s, %ld\n", x86_64_linux_call_registers[reg_index][QWord], get_qword(arg)); break;
         default: UNREACHABLE("Invalid Arg size");
     }
 }
 
-static void routine_call_arg_offset(String_Builder* out, Arg arg) {
+static void routine_call_arg_position(String_Builder* out, Arg arg, size_t reg_index) {
     switch (arg.size) {
-        case Byte: sb_appendf(out, "    mov dil, byte ptr [rbp - %zu]\n", arg.offset); break;
-        case Word: sb_appendf(out, "    mov di, word ptr [rbp - %zu]\n", arg.offset); break;
-        case DWord: sb_appendf(out, "    mov edi, dword ptr [rbp - %zu]\n", arg.offset); break;
-        case QWord: sb_appendf(out, "    mov rdi, qword ptr [rbp - %zu]\n", arg.offset); break;
+        case Byte: sb_appendf(out, "    mov %s, byte ptr [rbp - %zu]\n", x86_64_linux_call_registers[reg_index][Byte], arg.position); break;
+        case Word: sb_appendf(out, "    mov %s, word ptr [rbp - %zu]\n", x86_64_linux_call_registers[reg_index][Word], arg.position); break;
+        case DWord: sb_appendf(out, "    mov %s, dword ptr [rbp - %zu]\n", x86_64_linux_call_registers[reg_index][DWord], arg.position); break;
+        case QWord: sb_appendf(out, "    mov %s, qword ptr [rbp - %zu]\n", x86_64_linux_call_registers[reg_index][QWord], arg.position); break;
         default: UNREACHABLE("Invalid Arg size");
     }
+}
+
+static void routine_call_arg_offset(String_Builder* out, Arg arg, size_t reg_index) {
+    assert(arg.size == QWord);
+    sb_appendf(out, "    mov %s, offset .str_%zu\n", x86_64_linux_call_registers[reg_index][QWord], arg.position);
 }
 
 static void routine_call(String_Builder* out, Op op) {
-    Arg arg = op.routine_call.arg;
+    Arg* args = op.routine_call.args;
 
-    switch (arg.type) {
-        case Value: routine_call_arg_value(out, arg); break;
-        case Offset: routine_call_arg_offset(out, arg); break;
-        default: UNREACHABLE("Invalid Arg type");
+    for (size_t i = 0; i < arrlenu(args); ++i) {
+        Arg arg = args[i];
+        switch (arg.type) {
+            case Value: routine_call_arg_value(out, arg, i); break;
+            case Position: routine_call_arg_position(out, arg, i); break;
+            case Offset: routine_call_arg_offset(out, arg, i); break;
+            default: UNREACHABLE("Invalid Arg type");
+        }
     }
 
+    sb_appendf(out, "    mov al, 0\n"); // TODO: Support variadics
     sb_appendf(out, "    call %s\n", op.routine_call.name);
 }
 
@@ -68,12 +88,12 @@ static void binary_operation_load_lhs_factor(String_Builder* out, Arg lhs) {
                 case QWord: sb_appendf(out, "    mov rax, %ld\n", get_qword(lhs)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (lhs.size) {
-                case Byte: sb_appendf(out, "    mov al, byte ptr [rbp - %zu]\n", lhs.offset); break;
-                case Word: sb_appendf(out, "    mov ax, word ptr [rbp - %zu]\n", lhs.offset); break;
-                case DWord: sb_appendf(out, "    mov eax, dword ptr [rbp - %zu]\n", lhs.offset); break;
-                case QWord: sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", lhs.offset); break;
+                case Byte: sb_appendf(out, "    mov al, byte ptr [rbp - %zu]\n", lhs.position); break;
+                case Word: sb_appendf(out, "    mov ax, word ptr [rbp - %zu]\n", lhs.position); break;
+                case DWord: sb_appendf(out, "    mov eax, dword ptr [rbp - %zu]\n", lhs.position); break;
+                case QWord: sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", lhs.position); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -90,12 +110,12 @@ static void binary_operation_load_add_rhs_factor(String_Builder* out, Arg rhs) {
                 case QWord: sb_appendf(out, "    add rax, %ld\n", get_qword(rhs)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (rhs.size) {
-                case Byte: sb_appendf(out, "    add al, byte ptr [rbp - %zu]\n", rhs.offset); break;
-                case Word: sb_appendf(out, "    add ax, word ptr [rbp - %zu]\n", rhs.offset); break;
-                case DWord: sb_appendf(out, "    add eax, dword ptr [rbp - %zu]\n", rhs.offset); break;
-                case QWord: sb_appendf(out, "    add rax, qword ptr [rbp - %zu]\n", rhs.offset); break;
+                case Byte: sb_appendf(out, "    add al, byte ptr [rbp - %zu]\n", rhs.position); break;
+                case Word: sb_appendf(out, "    add ax, word ptr [rbp - %zu]\n", rhs.position); break;
+                case DWord: sb_appendf(out, "    add eax, dword ptr [rbp - %zu]\n", rhs.position); break;
+                case QWord: sb_appendf(out, "    add rax, qword ptr [rbp - %zu]\n", rhs.position); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -112,12 +132,12 @@ static void binary_operation_load_sub_rhs_factor(String_Builder* out, Arg rhs) {
                 case QWord: sb_appendf(out, "    sub rax, %ld\n", get_qword(rhs)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (rhs.size) {
-                case Byte: sb_appendf(out, "    sub al, byte ptr [rbp - %zu]\n", rhs.offset); break;
-                case Word: sb_appendf(out, "    sub ax, word ptr [rbp - %zu]\n", rhs.offset); break;
-                case DWord: sb_appendf(out, "    sub eax, dword ptr [rbp - %zu]\n", rhs.offset); break;
-                case QWord: sb_appendf(out, "    sub rax, qword ptr [rbp - %zu]\n", rhs.offset); break;
+                case Byte: sb_appendf(out, "    sub al, byte ptr [rbp - %zu]\n", rhs.position); break;
+                case Word: sb_appendf(out, "    sub ax, word ptr [rbp - %zu]\n", rhs.position); break;
+                case DWord: sb_appendf(out, "    sub eax, dword ptr [rbp - %zu]\n", rhs.position); break;
+                case QWord: sb_appendf(out, "    sub rax, qword ptr [rbp - %zu]\n", rhs.position); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -134,12 +154,12 @@ static void binary_operation_load_cmp_rhs_factor(String_Builder* out, Arg rhs) {
                 case QWord: sb_appendf(out, "    cmp rax, %ld\n", get_qword(rhs)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (rhs.size) {
-                case Byte: sb_appendf(out, "    cmp al, byte ptr [rbp - %zu]\n", rhs.offset); break;
-                case Word: sb_appendf(out, "    cmp ax, word ptr [rbp - %zu]\n", rhs.offset); break;
-                case DWord: sb_appendf(out, "    cmp eax, dword ptr [rbp - %zu]\n", rhs.offset); break;
-                case QWord: sb_appendf(out, "    cmp rax, qword ptr [rbp - %zu]\n", rhs.offset); break;
+                case Byte: sb_appendf(out, "    cmp al, byte ptr [rbp - %zu]\n", rhs.position); break;
+                case Word: sb_appendf(out, "    cmp ax, word ptr [rbp - %zu]\n", rhs.position); break;
+                case DWord: sb_appendf(out, "    cmp eax, dword ptr [rbp - %zu]\n", rhs.position); break;
+                case QWord: sb_appendf(out, "    cmp rax, qword ptr [rbp - %zu]\n", rhs.position); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -156,12 +176,12 @@ static void binary_operation_load_mul_rhs_factor(String_Builder* out, Arg rhs) {
                 case QWord: sb_appendf(out, "    imul rax, %ld\n", get_qword(rhs)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (rhs.size) {
-                case Byte: sb_appendf(out, "    imul al, byte ptr [rbp - %zu]\n", rhs.offset); break;
-                case Word: sb_appendf(out, "    imul ax, word ptr [rbp - %zu]\n", rhs.offset); break;
-                case DWord: sb_appendf(out, "    imul eax, dword ptr [rbp - %zu]\n", rhs.offset); break;
-                case QWord: sb_appendf(out, "    imul rax, qword ptr [rbp - %zu]\n", rhs.offset); break;
+                case Byte: sb_appendf(out, "    imul al, byte ptr [rbp - %zu]\n", rhs.position); break;
+                case Word: sb_appendf(out, "    imul ax, word ptr [rbp - %zu]\n", rhs.position); break;
+                case DWord: sb_appendf(out, "    imul eax, dword ptr [rbp - %zu]\n", rhs.position); break;
+                case QWord: sb_appendf(out, "    imul rax, qword ptr [rbp - %zu]\n", rhs.position); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -170,12 +190,12 @@ static void binary_operation_load_mul_rhs_factor(String_Builder* out, Arg rhs) {
 
 static void binary_operation_load_dst(String_Builder* out, Arg dst) {
     switch (dst.type) {
-        case Offset:
+        case Position:
             switch (dst.size) {
-                case Byte: sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.offset); break;
-                case Word: sb_appendf(out, "    mov word ptr [rbp - %zu], ax\n", dst.offset); break;
-                case DWord: sb_appendf(out, "    mov dword ptr [rbp - %zu], eax\n", dst.offset); break;
-                case QWord: sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.offset); break;
+                case Byte: sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.position); break;
+                case Word: sb_appendf(out, "    mov word ptr [rbp - %zu], ax\n", dst.position); break;
+                case DWord: sb_appendf(out, "    mov dword ptr [rbp - %zu], eax\n", dst.position); break;
+                case QWord: sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.position); break;
             } break;
         default: UNREACHABLE("Destination Arg can only be of the offset type");
     }
@@ -183,10 +203,10 @@ static void binary_operation_load_dst(String_Builder* out, Arg dst) {
 
 static void binary_operation_load_cmp_dst(String_Builder* out, Arg dst) {
     switch (dst.type) {
-        case Offset:
+        case Position:
             switch (dst.size) {
                 case Byte: sb_appendf(out, "    setl al\n");
-                           sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.offset); break;
+                           sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.position); break;
                 default: UNREACHABLE("Destination Arg can only be of size byte");
             } break;
         default: UNREACHABLE("Destination Arg can only be of the offset type");
@@ -274,12 +294,12 @@ static void jump_if_not(String_Builder* out, Op op) {
                 case QWord: sb_appendf(out, "    mov rax, %ld\n", get_qword(arg)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (arg.size) {
-                case Byte: sb_appendf(out, "    mov al, byte ptr [rbp - %zu]\n", arg.offset); break;
-                case Word: sb_appendf(out, "    mov ax, word ptr [rbp - %zu]\n", arg.offset); break;
-                case DWord: sb_appendf(out, "    mov eax, dword ptr [rbp - %zu]\n", arg.offset); break;
-                case QWord: sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", arg.offset); break;
+                case Byte: sb_appendf(out, "    mov al, byte ptr [rbp - %zu]\n", arg.position); break;
+                case Word: sb_appendf(out, "    mov ax, word ptr [rbp - %zu]\n", arg.position); break;
+                case DWord: sb_appendf(out, "    mov eax, dword ptr [rbp - %zu]\n", arg.position); break;
+                case QWord: sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", arg.position); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -309,35 +329,39 @@ static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
         case Value:
             switch (arg.size) {
                 case Byte: 
-                    sb_appendf(out, "    mov byte ptr [rbp - %zu], %d\n", dst.offset, get_byte(arg)); break;
+                    sb_appendf(out, "    mov byte ptr [rbp - %zu], %d\n", dst.position, get_byte(arg)); break;
                 case Word: 
-                    sb_appendf(out, "    mov word ptr [rbp - %zu], %d\n", dst.offset, get_word(arg)); break;
+                    sb_appendf(out, "    mov word ptr [rbp - %zu], %d\n", dst.position, get_word(arg)); break;
                 case DWord: 
-                    sb_appendf(out, "    mov dword ptr [rbp - %zu], %d\n", dst.offset, get_dword(arg)); break;
+                    sb_appendf(out, "    mov dword ptr [rbp - %zu], %d\n", dst.position, get_dword(arg)); break;
                 case QWord: 
-                    sb_appendf(out, "    mov qword ptr [rbp - %zu], %ld\n", dst.offset, get_qword(arg)); break;
+                    sb_appendf(out, "    mov qword ptr [rbp - %zu], %ld\n", dst.position, get_qword(arg)); break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
-        case Offset:
+        case Position:
             switch (arg.size) {
                 case Byte:
-                    sb_appendf(out, "    mov al, byte ptr [rbp - %zu]\n", arg.offset);
-                    sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.offset);
+                    sb_appendf(out, "    mov al, byte ptr [rbp - %zu]\n", arg.position);
+                    sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.position);
                     break;
                 case Word:
-                    sb_appendf(out, "    mov ax, word ptr [rbp - %zu]\n", arg.offset);
-                    sb_appendf(out, "    mov word ptr [rbp - %zu], ax\n", dst.offset);
+                    sb_appendf(out, "    mov ax, word ptr [rbp - %zu]\n", arg.position);
+                    sb_appendf(out, "    mov word ptr [rbp - %zu], ax\n", dst.position);
                     break;
                 case DWord:
-                    sb_appendf(out, "    mov eax, dword ptr [rbp - %zu]\n", arg.offset);
-                    sb_appendf(out, "    mov dword ptr [rbp - %zu], eax\n", dst.offset);
+                    sb_appendf(out, "    mov eax, dword ptr [rbp - %zu]\n", arg.position);
+                    sb_appendf(out, "    mov dword ptr [rbp - %zu], eax\n", dst.position);
                     break;
                 case QWord:
-                    sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", arg.offset);
-                    sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.offset);
+                    sb_appendf(out, "    mov rax, qword ptr [rbp - %zu]\n", arg.position);
+                    sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.position);
                     break;
                 default: UNREACHABLE("Invalid Arg size");
             } break;
+        case Offset: 
+            sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.position);
+            sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.position);
+            break;
         default: UNREACHABLE("Invalid Arg type");
     }
 }
@@ -347,7 +371,7 @@ static void assign_local(String_Builder* out, Op op) {
     Arg dst = op.assign_loc.offset_dst;
 
     switch (dst.type) {
-        case Offset: assign_local_value(out, dst, src); break;
+        case Position: assign_local_value(out, dst, src); break;
         default: UNREACHABLE("Destination Arg can only be of the offset type");
     }
 }
@@ -371,7 +395,20 @@ static void function_epilog(String_Builder* out) {
     sb_appendf(out, "    ret\n");
 }
 
-bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
+static void generate_static_data(String_Builder* out, Arg arg, size_t index) {
+    assert(arg.type == Offset);
+    sb_appendf(out, ".str_%zu:\n", index);
+    sb_appendf(out, "    .asciz \"%s\"\n", arg.string);
+    sb_appendf(out, "    .size .str_%zu, %zu\n", index, strlen(arg.string) + 1);
+}
+
+static void static_data(String_Builder* out, Arg* data) {
+    for (size_t i = 0; i < arrlenu(data); ++i) {
+        generate_static_data(out, data[i], i);
+    }
+}
+
+bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
     sb_appendf(out, ".intel_syntax noprefix\n");
     sb_appendf(out, ".text\n");
     function_prolog(out, "main");
@@ -391,5 +428,6 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops) {
     }
 
     function_epilog(out);
+    static_data(out, data);
     return true;
 }

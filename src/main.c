@@ -46,7 +46,8 @@ int main(int argc, char** argv) {
     String_Builder result = {0};
 
     Op* ops = get_ops();
-    if (!generate_GAS_x86_64(&result, ops)) exit(GEN_ERROR);
+    Arg* data = get_data();
+    if (!generate_GAS_x86_64(&result, ops, data)) exit(GEN_ERROR);
 
     String_Builder asm_file = {0};
     sb_appendf(&asm_file, "%s.asm", argv[file_name]);

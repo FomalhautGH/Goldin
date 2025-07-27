@@ -13,6 +13,7 @@ const char* display_type(TokenType type) {
         case LeftBracket: return "{";
         case RightBracket: return "}";
         case While: return "While";
+        case Comma: return ",";
         case Slash: return "/";
         case Equal: return "=";
         case Greater: return ">";

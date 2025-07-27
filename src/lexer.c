@@ -177,6 +177,7 @@ bool next_token() {
         case '/': lexer.token_type = Slash; break;
         case '+': lexer.token_type = Plus; break;
         case '-': lexer.token_type = Minus; break;
+        case ',': lexer.token_type = Comma; break;
         case '*': lexer.token_type = Star; break;
         case '"': parse_string(); break;
         default: {
