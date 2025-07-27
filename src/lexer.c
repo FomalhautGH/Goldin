@@ -131,7 +131,7 @@ void error_msg(const char* msg) {
 
 void error_expected(TokenType expected, TokenType got) {
     String_Builder msg = {0};
-    sb_appendf(&msg, "Expected %s but insted got %s", display_type(expected), display_type(got));
+    sb_appendf(&msg, "Expected '%s' but instead got '%s'", display_type(expected), display_type(got));
     sb_append_null(&msg);
     error_msg(msg.items);
     sb_free(msg);
@@ -182,7 +182,7 @@ bool next_token() {
         default: {
             if (isalpha(peek_prev())) parse_identifier(); 
             else if (isdigit(peek_prev())) parse_number(); 
-            else UNREACHABLE("Weird");
+            else UNREACHABLE("Unsupported character");
         }
     }
 

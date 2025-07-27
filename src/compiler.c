@@ -49,6 +49,10 @@ static const char* expect_consume_id_and_get_string() {
     return result;
 }
 
+static bool is_eof() {
+    return get_type() == Eof;
+}
+
 static long find_var_offset(const char* name) {
     size_t last = arrlenu(comp.local_vars) - 1;
 
@@ -177,6 +181,7 @@ static bool compile_expression(Arg* arg) {
 static bool variable_initialization() {
     Arg arg = {0};
     Arg dst = {0};
+    consume();
 
     size_t current_offset = comp.offset;
     if (!compile_expression(&arg)) return false;
@@ -200,9 +205,9 @@ static bool variable_declaration() {
 
     if (!declare_variable(var_type, var_name)) return false;
 
-    switch (consume().type) {
+    switch (get_type()) {
         case Equal: return variable_initialization();
-        case SemiColon: return true;
+        case SemiColon: consume(); return true;
         default: {
             error_msg("COMPILATION ERROR: Expected ';' after variable declaration");
         } return false;
@@ -213,6 +218,7 @@ static bool variable_declaration() {
 
 static bool routine_call(const char* name) {
     Arg arg = {0};
+    consume();
 
     if (!compile_expression(&arg)) return false;
     push_op(OpRoutineCall(name, arg));
@@ -225,6 +231,7 @@ static bool routine_call(const char* name) {
 static bool assignment(const char* name) {
     Arg arg = {0};
     Arg dst = {0};
+    consume();
 
     if (!compile_expression(&arg)) return false;
 
@@ -243,18 +250,19 @@ static bool assignment(const char* name) {
 static bool identifier() {
     const char* name = expect_consume_id_and_get_string();
 
-    switch (consume().type) {
+    switch (get_type()) {
+        case SemiColon: return true;
         case Equal: return assignment(name);
         case LeftParen: return routine_call(name); 
-        case SemiColon: break;
         default: error_msg("COMPILATION ERROR: Unexpected token after identifier"); return false;
     }
 
-    return true;
+    UNREACHABLE("");
 }
 
 static bool statement() {
     switch (get_type()) {
+        case SemiColon: consume(); return true;
         case VarTypei8:
         case VarTypei16:
         case VarTypei32:
@@ -268,11 +276,10 @@ static bool statement() {
 
         case Identifier: if (!identifier()) return false; break;
         case While: if (!while_loop()) return false; break;
-        case SemiColon: consume(); return true; break;
         case LeftBracket: if (!block()) return false; break;
 
         case Eof:
-            error_msg("COMPILATION ERROR: Expected ';' after statement");
+            error_msg("COMPILATION ERROR: Expected statement");
             return false;
 
         default:
@@ -289,7 +296,7 @@ static bool block() {
     if (!expect_and_consume(LeftBracket)) return false;
     arrput(comp.local_vars, NULL);
 
-    while (get_type() != RightBracket) {
+    while (!is_eof() && get_type() != RightBracket) {
         if (!statement()) return false;
     }
 

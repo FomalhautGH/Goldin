@@ -13,10 +13,10 @@ typedef struct {
 } HashMap;
 
 typedef struct {
-    const char* input_stream; // File name
+    const char* input_stream;
 
-    String_Builder file_content; // File content
-    size_t position; // Position in content
+    String_Builder file_content;
+    size_t position;
 
     TokenType token_type;
     String_Builder token_value;
