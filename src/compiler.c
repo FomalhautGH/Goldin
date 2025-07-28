@@ -11,7 +11,7 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
 static size_t push_op(Op op) {
     size_t index = arrlenu(comp.ops);
-    arrput(comp.ops, op);
+    arrpush(comp.ops, op);
     return index;
 }
 
@@ -239,7 +239,7 @@ static bool routine_call(const char* name) {
 
     while (!is_eof() && get_type() != RightParen) {
         if (!compile_expression(&arg)) return false;
-        arrput(args, arg);
+        arrpush(args, arg);
 
         switch (get_type()) {
             case RightParen: continue;
@@ -250,7 +250,7 @@ static bool routine_call(const char* name) {
         }
     }
 
-    if (arrlenu(args) > 6) {
+    if (arrlenu(args) > X86_64_LINUX_CALL_REGISTERS_NUM) {
         error_msg("COMPILATION ERROR: We only support 6 arguments for now");
         return false;
     }
@@ -327,7 +327,7 @@ static bool statement() {
 
 static bool block() {
     if (!expect_and_consume(LeftBracket)) return false;
-    arrput(comp.local_vars, NULL);
+    arrpush(comp.local_vars, NULL);
 
     while (!is_eof() && get_type() != RightBracket) {
         if (!statement()) return false;

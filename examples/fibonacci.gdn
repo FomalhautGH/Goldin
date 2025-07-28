@@ -6,10 +6,9 @@ rt main() {
     i32 i = 0;
 
     while (i < 15) {
+        printf("%d\n", a);
+
         i32 c = a + b;
-
-        printf("%d\n", c);
-
         a = b;
         b = c;
         i = i + 1;

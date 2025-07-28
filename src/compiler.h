@@ -51,6 +51,8 @@ typedef struct {
 #define OpJump(label) (Op) {.type = Jump, .jump = { label }}
 #define OpLabel(index) (Op) {.type = Label, .label = { index }}
 
+#define X86_64_LINUX_CALL_REGISTERS_NUM 6
+
 typedef struct {
     const char* key;
     int value;
