@@ -1,6 +1,7 @@
 #include "codegen.h"
 #include "compiler.h"
 #include "token.h"
+#include <stddef.h>
 
 #define DIMENTIONS 4
 
@@ -257,19 +258,18 @@ static void assign_local(String_Builder* out, Op op) {
     }
 }
 
-static void reserve_bytes(String_Builder* out, Op op) {
-    size_t bytes = op.reserve_bytes.bytes;
-    if (bytes > 0) sb_appendf(out, "    sub rsp, %zu\n", bytes);
-}
-
-static void function_prolog(String_Builder* out, const char* name) {
-    sb_appendf(out, ".globl %s\n", name);
-    sb_appendf(out, "%s:\n", name);
+static void routine_prolog(String_Builder* out, Op op) {
+    sb_appendf(out, ".globl %s\n", op.new_routine.name);
+    sb_appendf(out, "%s:\n", op.new_routine.name);
     sb_appendf(out, "    push rbp\n");
     sb_appendf(out, "    mov rbp, rsp\n");
+
+    size_t bytes = op.new_routine.bytes;
+    if (bytes > 0) 
+        sb_appendf(out, "    sub rsp, %ld\n", bytes);
 }
 
-static void function_epilog(String_Builder* out) {
+static void routine_epilog(String_Builder* out) {
     sb_appendf(out, "    mov rsp, rbp\n");
     sb_appendf(out, "    xor rax, rax\n");
     sb_appendf(out, "    pop rbp\n");
@@ -292,7 +292,6 @@ static void static_data(String_Builder* out, Arg* data) {
 bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
     sb_appendf(out, ".intel_syntax noprefix\n");
     sb_appendf(out, ".text\n");
-    function_prolog(out, "main");
 
     size_t len = arrlenu(ops);
     for (size_t i = 0; i < len; ++i) {
@@ -300,8 +299,9 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
         sb_appendf(out, "# %s\n", display_op(op));
         switch (op.type) {
             case RoutineCall: routine_call(out, op); break;
+            case NewRoutine: routine_prolog(out, op); break;
+            case RtReturn: routine_epilog(out); break;
             case AssignLocal: assign_local(out, op); break;
-            case ReserveBytes: reserve_bytes(out, op); break;
             case Binary: binary_operation(out, op); break;
             case JumpIfNot: jump_if_not(out, op); break;
             case Jump: jump(out, op); break;
@@ -310,7 +310,6 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
         sb_appendf(out, "\n");
     }
 
-    function_epilog(out);
     static_data(out, data);
     return true;
 }

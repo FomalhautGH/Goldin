@@ -1,5 +1,6 @@
 rt foo() {
-    printf("Foo\n");
+    printf("foo\n");
+    foo();
 }
 
 rt main() {

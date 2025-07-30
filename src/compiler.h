@@ -2,6 +2,7 @@
 #define COMPILER_HEADER
 
 #include "lexer.h"
+#include <stddef.h>
 
 #define NOB_STRIP_PREFIX
 #include "nob.h"
@@ -23,7 +24,8 @@ typedef enum {
 
 typedef struct {
     enum {
-        ReserveBytes,
+        NewRoutine,
+        RtReturn,
         AssignLocal,
         RoutineCall,
         Binary,
@@ -33,7 +35,8 @@ typedef struct {
     } type;
 
     union {
-        struct { size_t bytes; } reserve_bytes;
+        struct { const char* name; size_t bytes; } new_routine;
+        struct { } routine_ret;
         struct { Arg offset_dst; Arg arg; } assign_loc;
         struct { const char* name; Arg* args; } routine_call;
         struct { Arg offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
@@ -45,11 +48,12 @@ typedef struct {
 
 #define OpAssignLocal(dst, src) (Op) {.type = AssignLocal, .assign_loc = { dst, src }}
 #define OpRoutineCall(name, args) (Op) {.type = RoutineCall, .routine_call = { name, args }}
-#define OpReserveBytes(bytes) (Op) {.type = ReserveBytes, .reserve_bytes = { bytes }}
 #define OpBinary(dst, op, lhs, rhs) (Op) {.type = Binary, .binop = { dst, op, lhs, rhs }}
 #define OpJumpIfNot(label, arg) (Op) {.type = JumpIfNot, .jump_if_not = { label, arg }}
 #define OpJump(label) (Op) {.type = Jump, .jump = { label }}
 #define OpLabel(index) (Op) {.type = Label, .label = { index }}
+#define OpNewRoutine(name, bytes) (Op) { .type = NewRoutine, .new_routine = { name, bytes }}
+#define OpReturn() (Op) { .type = RtReturn }
 
 #define X86_64_LINUX_CALL_REGISTERS_NUM 6
 

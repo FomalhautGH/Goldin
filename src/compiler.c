@@ -1,5 +1,6 @@
 #include "lexer.h"
 #include "token.h"
+#include <string.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
@@ -10,8 +11,9 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
 const char* display_op(Op op) {
     switch (op.type) {
-        case ReserveBytes: return "ReserveBytes";
         case AssignLocal: return "AssignLocal";
+        case NewRoutine: return "Routine";
+        case RtReturn: return "Return";
         case RoutineCall: return "RoutineCall";
         case Binary: return "Binary";
         case Label: return "Label";
@@ -434,21 +436,19 @@ static bool while_loop() {
 }
 
 static bool compile_routine_body() {
-    // if (strcmp(get_value().items, "main") != 0) {
-    //     error_msg("COMPILATION ERROR: Only main function supported right now");
-    //     return false;
-    // }
-
+    consume();
+    const char* name = strdup(get_value().items);
     consume();
 
-    size_t reserve = push_op(OpReserveBytes(0));
+    size_t rt = push_op(OpNewRoutine(name, 0));
 
     if (!expect_and_consume(LeftParen)) return false;
-    // TODO: function arguments
+    // TODO: routine arguments
     if (!expect_and_consume(RightParen)) return false;
     if (!block()) return false;
 
-    comp.ops[reserve].reserve_bytes.bytes = comp.position;
+    push_op(OpReturn());
+    comp.ops[rt].new_routine.bytes = comp.position;
     return true;
 }
 
@@ -479,11 +479,11 @@ bool generate_ops() {
     consume();
 
     while (true) {
-        Token current_token = consume();
+        Token current_token = get_token();
         switch (current_token.type) {
             case Eof: return true;
             case ParseError: return false;
-            case Routine: return compile_routine_body();
+            case Routine: if (!compile_routine_body()) return false; break;
             default: {
                 error_msg("COMPILATION ERROR: A program file is composed by only routines");
                 return false;
