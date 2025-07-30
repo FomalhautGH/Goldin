@@ -123,7 +123,7 @@ static void binary_operation_load_dst(String_Builder* out, Arg dst) {
 
 static void binary_operation_load_cmp_dst(String_Builder* out, Arg dst) {
     if (dst.type != Position) UNREACHABLE("Destination Arg can only be of the position type");
-    if (dst.size != Byte) UNREACHABLE("Destination Arg can only be of size byte");
+    if (dst.size != Byte) UNREACHABLE("Destination Arg con only be of size byte");
     sb_appendf(out, "    setl al\n");
     sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.position);
 }
@@ -132,10 +132,6 @@ static void binary_operation_add(String_Builder* out, Op op) {
     Arg lhs = op.binop.lhs;
     Arg rhs = op.binop.rhs;
     Arg dst = op.binop.offset_dst;
-
-    // TODO: support typecheking in expressions in order to always have the same size
-    assert(lhs.size == rhs.size);
-    assert(lhs.size == dst.size);
 
     binary_operation_load_factor(out, lhs, "mov");
     binary_operation_load_factor(out, rhs, "add");
@@ -191,7 +187,7 @@ static void binary_operation(String_Builder* out, Op op) {
         case Add: binary_operation_add(out, op); break;
         case Sub: binary_operation_sub(out, op); break;
         case Mul: binary_operation_mul(out, op); break;
-        case LessThan: binary_operation_lessthan(out, op); break;
+        case Lt: binary_operation_lessthan(out, op); break;
         default: TODO("Binary operation unsupported yet");
     } 
 }
@@ -227,20 +223,21 @@ static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
     switch (arg.type) {
         case Value: {
             sb_appendf(out, "    mov ");
-            insert_ptr_dimension(out, arg);
+            insert_ptr_dimension(out, dst);
             sb_appendf(out, " ptr [rbp - %zu], ", dst.position);
             insert_immediate(out, arg);
             sb_appendf(out, "\n");
         } break;
         case Position: {
-            const char* reg = x86_64_linux_temp_registers[arg.size];
-            sb_appendf(out, "    mov %s, ", reg);
+            const char* reg_arg = x86_64_linux_temp_registers[arg.size];
+            const char* reg_dst = x86_64_linux_temp_registers[dst.size];
+            sb_appendf(out, "    mov %s, ", reg_arg);
             insert_ptr_dimension(out, arg);
             sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
             sb_appendf(out, "    mov ");
-            insert_ptr_dimension(out, arg);
+            insert_ptr_dimension(out, dst);
             sb_appendf(out, " ptr [rbp - %zu], ", dst.position);
-            sb_appendf(out, "%s\n", reg);
+            sb_appendf(out, "%s\n", reg_dst);
         } break;
         case Offset: {
             sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.position);
@@ -300,6 +297,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
     size_t len = arrlenu(ops);
     for (size_t i = 0; i < len; ++i) {
         Op op = ops[i];
+        sb_appendf(out, "# %s\n", display_op(op));
         switch (op.type) {
             case RoutineCall: routine_call(out, op); break;
             case AssignLocal: assign_local(out, op); break;
@@ -309,6 +307,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
             case Jump: jump(out, op); break;
             case Label: label(out, op); break;
         }
+        sb_appendf(out, "\n");
     }
 
     function_epilog(out);

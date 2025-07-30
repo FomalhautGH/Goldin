@@ -18,7 +18,7 @@ typedef enum {
     Sub,
     Mul,
     Div,
-    LessThan,
+    Lt,
 } Binop;
 
 typedef struct {
@@ -53,9 +53,14 @@ typedef struct {
 
 #define X86_64_LINUX_CALL_REGISTERS_NUM 6
 
+#define max(a, b)               \
+   ({ __typeof__ (a) _a = (a);  \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
+
 typedef struct {
     const char* key;
-    int value;
+    Arg value;
 } VarsHashmap;
 
 typedef struct {
@@ -71,5 +76,6 @@ void free_compiler();
 bool generate_ops();
 Op* get_ops();
 Arg* get_data();
+const char* display_op(Op op);
 
 #endif
