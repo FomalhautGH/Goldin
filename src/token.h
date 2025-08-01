@@ -7,15 +7,18 @@
 typedef enum {
     Eof,
     ParseError,
-    Routine,
-    Return,
     Comma,
     SemiColon,
     LeftParen,
     RightParen,
     LeftBracket,
     RightBracket,
+
+    If,
+    Else,
     While,
+    Return,
+    Routine,
 
     VarTypei8,
     VarTypei16,

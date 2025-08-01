@@ -1,11 +1,12 @@
 #include "lexer.h"
 #include "token.h"
+#include <stddef.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
 
-static bool block();
-static bool while_loop();
+static bool block_statement();
+static bool while_statement();
 static bool compile_expression(Arg* arg);
 static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
@@ -26,6 +27,15 @@ const char* display_op(Op op) {
 static size_t push_op(Op op) {
     size_t index = arrlenu(comp.ops);
     arrpush(comp.ops, op);
+    return index;
+}
+
+static size_t push_label_op() {
+    size_t index = comp.label_index;
+    push_op(OpLabel(index));
+
+    comp.label_index += 1;
+
     return index;
 }
 
@@ -399,6 +409,30 @@ static bool return_statement() {
     return true;
 }
 
+static bool if_statement() {
+    Arg cond = {0};
+    consume();
+
+    if (!expect_and_consume(LeftParen)) return false;
+    if (!compile_expression(&cond)) return false;
+    if (!expect_and_consume(RightParen)) return false;
+
+    size_t end_if_block = push_op(OpJumpIfNot(0, cond));
+    if (!block_statement()) return false;
+
+    if (get_type() == Else) {
+        consume();
+        size_t end_else_block = push_op(OpJump(0));
+        comp.ops[end_if_block].jump_if_not.label = push_label_op();
+        if (!block_statement()) return false;
+        comp.ops[end_else_block].jump.label = push_label_op();
+    } else {
+        comp.ops[end_if_block].jump_if_not.label = push_label_op();
+    }
+
+    return true;
+}
+
 static bool statement() {
     switch (get_type()) {
         case SemiColon: consume(); return true;
@@ -414,9 +448,10 @@ static bool statement() {
         case VarTypef64: if (!variable_declaration()) return false; break;
 
         case Identifier: if (!identifier_statement()) return false; break;
-        case While: if (!while_loop()) return false; break;
-        case LeftBracket: if (!block()) return false; break;
+        case While: if (!while_statement()) return false; break;
+        case LeftBracket: if (!block_statement()) return false; break;
         case Return: if (!return_statement()) return false; break;
+        case If: if (!if_statement()) return false; break;
 
         case Eof:
             error_msg("COMPILATION ERROR: Expected statement");
@@ -431,7 +466,7 @@ static bool statement() {
     return true;
 }
 
-static bool block() {
+static bool block_statement() {
     if (!expect_and_consume(LeftBracket)) return false;
     arrpush(comp.local_vars, NULL);
 
@@ -444,16 +479,7 @@ static bool block() {
     return true;
 }
 
-static size_t push_label_op() {
-    size_t index = comp.label_index;
-    push_op(OpLabel(index));
-
-    comp.label_index += 1;
-
-    return index;
-}
-
-static bool while_loop() {
+static bool while_statement() {
     Arg cond = {0};
     cond.size = Byte;
 
@@ -464,7 +490,7 @@ static bool while_loop() {
     if (!compile_expression(&cond)) return false;
     if (!expect_and_consume(RightParen)) return false;
     size_t jmpifnot = push_op(OpJumpIfNot(0, cond));
-    if (!block()) return false;
+    if (!block_statement()) return false;
 
     push_op(OpJump(start_loop));
     comp.ops[jmpifnot].jump_if_not.label = push_label_op();

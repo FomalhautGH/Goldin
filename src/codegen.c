@@ -319,7 +319,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
     size_t len = arrlenu(ops);
     for (size_t i = 0; i < len; ++i) {
         Op op = ops[i];
-        sb_appendf(out, "# %s\n", display_op(op));
+        // sb_appendf(out, "# %s\n", display_op(op));
         switch (op.type) {
             case RoutineCall: routine_call(out, op); break;
             case NewRoutine: routine_prolog(out, op); break;
@@ -330,7 +330,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
             case Jump: jump(out, op); break;
             case Label: label(out, op); break;
         }
-        sb_appendf(out, "\n");
+        // sb_appendf(out, "\n");
     }
 
     static_data(out, data);

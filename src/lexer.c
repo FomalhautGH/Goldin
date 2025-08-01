@@ -52,6 +52,10 @@ static void keyword_id() {
         lexer.token_type = Routine;
     } else if (strcmp(id, "ret") == 0) {
         lexer.token_type = Return;
+    } else if (strcmp(id, "if") == 0) {
+        lexer.token_type = If;
+    } else if (strcmp(id, "else") == 0) {
+        lexer.token_type = Else;
     } else if (strcmp(id, "while") == 0) {
         lexer.token_type = While;
     } else if (strcmp(id, "i8") == 0) {
