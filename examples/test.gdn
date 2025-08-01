@@ -1,8 +1,8 @@
-rt foo() {
-    printf("foo\n");
-    foo();
+rt sum(i64 a, i8 b) {
+    ret a + b;
 }
 
 rt main() {
-    foo();
+    i32 result = sum(35, 45);
+    printf("%d\n", result);
 }

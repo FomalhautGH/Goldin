@@ -1,12 +1,12 @@
 #include "lexer.h"
 #include "token.h"
-#include <string.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
 
 static bool block();
 static bool while_loop();
+static bool compile_expression(Arg* arg);
 static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
 const char* display_op(Op op) {
@@ -29,7 +29,7 @@ static size_t push_op(Op op) {
     return index;
 }
 
-static void position_arg(Arg* arg_ptr, int size, size_t position) {
+static void position_arg(Arg* arg_ptr, Size size, size_t position) {
     arg_ptr->size = size;
     arg_ptr->type = Position;
     arg_ptr->position = position;
@@ -77,8 +77,31 @@ static Arg find_local_var(const char* name) {
     return (Arg){0};
 }
 
+static Size get_var_size() {
+    Size size = 0;
+
+    switch (get_type()) {
+        case VarTypeu8:
+        case VarTypei8: size = Byte; break;
+
+        case VarTypeu16:
+        case VarTypei16: size = Word; break;
+
+        case VarTypef32: 
+        case VarTypeu32:
+        case VarTypei32: size = DWord; break;
+
+        case VarTypef64: 
+        case VarTypeu64:
+        case VarTypei64: size = QWord; break;
+        default: UNREACHABLE("Not a valid var type");
+    }
+
+    return size;
+}
+
 static bool declare_variable(TokenType var_type, const char* name) {
-    uint size = 0;
+    Size size = 0;
     switch (var_type) {
         case VarTypeu8:
         case VarTypei8: size = Byte; comp.position += 1; break;
@@ -122,17 +145,55 @@ static bool int_literal_to_arg(Arg* arg) {
     return true;
 }
 
-static bool var_id_to_arg(Arg* arg) {
-    const char* name = get_value().items;
-    Arg var = find_local_var(name);
+static bool routine_call(Arg* arg, const char* name) {
+    Arg temp_arg = {0};
+    Arg* args = NULL;
+    consume();
 
+    while (!is_eof() && get_type() != RightParen) {
+        // TODO: default arg size should be of the formal param type
+        temp_arg.size = QWord;
+        if (!compile_expression(&temp_arg)) return false;
+        arrpush(args, temp_arg);
+
+        switch (get_type()) {
+            case RightParen: continue;
+            case Comma: consume(); continue;
+            default:
+                print_current_type();
+                error_msg("COMPILATION ERROR: Unknown Token in routine arguments");
+                return false;
+        }
+    }
+
+    // TODO: remove this
+    if (arrlenu(args) > X86_64_LINUX_CALL_REGISTERS_NUM) {
+        error_msg("COMPILATION ERROR: We only support 6 arguments for now");
+        return false;
+    }
+
+    push_op(OpRoutineCall(name, args));
+    if (!expect_and_consume(RightParen)) return false;
+    if (arg) arg->type = ReturnVal;
+    return true;
+}
+
+static bool identifier_expression(Arg* arg) {
+    const char* name = strdup(get_value().items);
+    consume();
+    
+    if (get_type() == LeftParen) {
+        if (!routine_call(arg, name)) return false;
+        return true;
+    }
+
+    Arg var = find_local_var(name);
     if (var.position == 0) {
         error_msg("COMPILATION ERROR: Usage of undefined variable");
         return false;
     }
     
     position_arg(arg, var.size, var.position);
-    consume();
     return true;
 }
 
@@ -145,7 +206,7 @@ static bool compile_binop(Arg* arg) {
     if (!compile_expression_wrapped(&rhs, op_type)) return false;
 
     Binop binop = 0;
-    uint size = max(arg->size, rhs.size);
+    Size size = max(arg->size, rhs.size);
     switch (op_type) {
         case Plus: binop = Add; break;
         case Minus: binop = Sub; break;
@@ -187,7 +248,7 @@ static bool string_literal_to_arg(Arg* arg) {
 
 static bool compile_primary_expression(Arg* arg) {
     switch (get_type()) {
-        case Identifier: return var_id_to_arg(arg);
+        case Identifier: return identifier_expression(arg);
         case IntLiteral: return int_literal_to_arg(arg);
         case StringLiteral: return string_literal_to_arg(arg);
         case LeftParen: TODO("Groupings unsupported yet"); break;
@@ -235,7 +296,7 @@ static bool assignment(const char* name) {
     Arg dst = {0};
     consume();
 
-    uint size = 0;
+    Size size = 0;
     switch (var_type) {
         case VarTypeu8:
         case VarTypei8: size = Byte; break;
@@ -266,7 +327,7 @@ static bool variable_initialization(TokenType var_type) {
     Arg dst = {0};
     consume();
 
-    uint size = 0;
+    Size size = 0;
     switch (var_type) {
         case VarTypeu8:
         case VarTypei8: size = Byte; break;
@@ -289,7 +350,7 @@ static bool variable_initialization(TokenType var_type) {
     position_arg(&dst, size, current_position);
     push_op(OpAssignLocal(dst, arg));
 
-    expect_and_consume(SemiColon);
+    if (!expect_and_consume(SemiColon)) return false;
     return true;
 }
 
@@ -317,49 +378,25 @@ static bool variable_declaration() {
     UNREACHABLE("");
 }
 
-static bool routine_call(const char* name) {
-    Arg arg = {0};
-    Arg* args = NULL;
-    consume();
-
-    while (!is_eof() && get_type() != RightParen) {
-        // TODO: default arg size should be of the formal param type
-        arg.size = QWord;
-        if (!compile_expression(&arg)) return false;
-        arrpush(args, arg);
-
-        switch (get_type()) {
-            case RightParen: continue;
-            case Comma: consume(); continue;
-            default:
-                error_msg("COMPILATION ERROR: Unknown Token in routine arguments");
-                return false;
-        }
-    }
-
-    // TODO: remove this
-    if (arrlenu(args) > X86_64_LINUX_CALL_REGISTERS_NUM) {
-        error_msg("COMPILATION ERROR: We only support 6 arguments for now");
-        return false;
-    }
-
-    push_op(OpRoutineCall(name, args));
-    if (!expect_and_consume(RightParen)) return false;
-    if (!expect_and_consume(SemiColon)) return false;
-    return true;
-}
-
-static bool identifier() {
+static bool identifier_statement() {
     const char* name = expect_consume_id_and_get_string();
 
     switch (get_type()) {
         case SemiColon: return true;
         case Equal: return assignment(name);
-        case LeftParen: return routine_call(name); 
+        case LeftParen: return routine_call(NULL, name); 
         default: error_msg("COMPILATION ERROR: Unexpected token after identifier"); return false;
     }
 
     UNREACHABLE("");
+}
+
+static bool return_statement() {
+    consume();
+    Arg arg = {0};
+    compile_expression(&arg);
+    push_op(OpReturn(arg));
+    return true;
 }
 
 static bool statement() {
@@ -376,19 +413,19 @@ static bool statement() {
         case VarTypef32:
         case VarTypef64: if (!variable_declaration()) return false; break;
 
-        case Identifier: if (!identifier()) return false; break;
+        case Identifier: if (!identifier_statement()) return false; break;
         case While: if (!while_loop()) return false; break;
         case LeftBracket: if (!block()) return false; break;
+        case Return: if (!return_statement()) return false; break;
 
         case Eof:
             error_msg("COMPILATION ERROR: Expected statement");
             return false;
 
         default:
-            printf("%s\n", display_type(get_token().type));
+            print_current_type();
             error_msg("COMPILATION ERROR: Unsupported token type in statement");
             return false;
-                 
     }
 
     return true;
@@ -435,20 +472,55 @@ static bool while_loop() {
     return true;
 }
 
+static bool routine_argument(Arg* args[]) {
+    TokenType type = get_type();
+    Size size = get_var_size();
+    consume();
+
+    const char* name = strdup(get_value().items);
+    consume();
+    declare_variable(type, name);
+
+    Arg arg = {
+        .size = size,
+        .type = Position,
+        .position = comp.position
+    };
+
+    arrpush(*args, arg);
+    return true;
+}
+
 static bool compile_routine_body() {
     consume();
     const char* name = strdup(get_value().items);
     consume();
 
-    size_t rt = push_op(OpNewRoutine(name, 0));
+    Arg* args = NULL;
+    size_t prev_pos = comp.position;
+    comp.position = 0;
+    size_t rt = push_op(OpNewRoutine(name, 0, NULL));
+
+    arrpush(comp.local_vars, NULL);
 
     if (!expect_and_consume(LeftParen)) return false;
-    // TODO: routine arguments
+    while (get_type() != RightParen) {
+        if (!routine_argument(&args)) return false;
+        if (get_type() == Comma) consume(); 
+    }
     if (!expect_and_consume(RightParen)) return false;
-    if (!block()) return false;
 
-    push_op(OpReturn());
+    if (!expect_and_consume(LeftBracket)) return false;
+    while (!is_eof() && get_type() != RightBracket) {
+        if (!statement()) return false;
+    }
+    if (!expect_and_consume(RightBracket)) return false;
+
+    push_op(OpReturn((Arg){0}));
     comp.ops[rt].new_routine.bytes = comp.position;
+    comp.ops[rt].new_routine.args = args;
+    comp.position = prev_pos;
+    arrpop(comp.local_vars);
     return true;
 }
 

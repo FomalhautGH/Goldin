@@ -1,7 +1,8 @@
 #include "codegen.h"
 #include "compiler.h"
 #include "token.h"
-#include <stddef.h>
+#include <assert.h>
+#include <stdio.h>
 
 #define DIMENTIONS 4
 
@@ -14,7 +15,7 @@ static const char* x86_64_linux_call_registers[X86_64_LINUX_CALL_REGISTERS_NUM][
     {"r9b", "r9w", "r9d", "r9"}
 };
 
-static const char* x86_64_linux_temp_registers[] = {
+static const char* x86_64_linux_rax_registers[] = {
     "al", "ax", "eax", "rax"
 };
 
@@ -99,7 +100,7 @@ static void routine_call(String_Builder* out, Op op) {
 }
 
 static void binary_operation_load_factor(String_Builder* out, Arg arg, const char* ins) {
-    sb_appendf(out, "    %s %s, ", ins, x86_64_linux_temp_registers[arg.size]);
+    sb_appendf(out, "    %s %s, ", ins, x86_64_linux_rax_registers[arg.size]);
 
     switch (arg.type) {
         case Value: insert_immediate(out, arg); break;
@@ -114,7 +115,7 @@ static void binary_operation_load_factor(String_Builder* out, Arg arg, const cha
 }
 
 static void binary_operation_load_dst(String_Builder* out, Arg dst) {
-    const char* reg = x86_64_linux_temp_registers[dst.size];
+    const char* reg = x86_64_linux_rax_registers[dst.size];
     if (dst.type != Position) UNREACHABLE("Destination Arg can only be of the position type");
 
     sb_appendf(out, "    mov ");
@@ -196,7 +197,7 @@ static void binary_operation(String_Builder* out, Op op) {
 static void jump_if_not(String_Builder* out, Op op) {
     Arg arg = op.jump_if_not.arg;
 
-    const char* reg = x86_64_linux_temp_registers[arg.size];
+    const char* reg = x86_64_linux_rax_registers[arg.size];
     sb_appendf(out, "    mov %s, ", reg);
 
     switch (arg.type) {
@@ -230,8 +231,8 @@ static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
             sb_appendf(out, "\n");
         } break;
         case Position: {
-            const char* reg_arg = x86_64_linux_temp_registers[arg.size];
-            const char* reg_dst = x86_64_linux_temp_registers[dst.size];
+            const char* reg_arg = x86_64_linux_rax_registers[arg.size];
+            const char* reg_dst = x86_64_linux_rax_registers[dst.size];
             sb_appendf(out, "    mov %s, ", reg_arg);
             insert_ptr_dimension(out, arg);
             sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
@@ -243,6 +244,12 @@ static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
         case Offset: {
             sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.position);
             sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.position);
+        } break;
+        case ReturnVal: {
+            const char* reg_arg = x86_64_linux_rax_registers[arg.size];
+            sb_appendf(out, "    mov ");
+            insert_ptr_dimension(out, dst);
+            sb_appendf(out, " ptr [rbp - %zu], %s\n", dst.position, reg_arg);
         } break;
         default: UNREACHABLE("Invalid Arg type");
     }
@@ -265,13 +272,29 @@ static void routine_prolog(String_Builder* out, Op op) {
     sb_appendf(out, "    mov rbp, rsp\n");
 
     size_t bytes = op.new_routine.bytes;
-    if (bytes > 0) 
-        sb_appendf(out, "    sub rsp, %ld\n", bytes);
+    if (bytes > 0) sb_appendf(out, "    sub rsp, %ld\n", bytes);
+
+    for (size_t i = 0; i < arrlenu(op.new_routine.args); ++i) {
+        Arg arg = op.new_routine.args[i];
+        sb_appendf(out, "    mov [rbp - %zu], %s\n", arg.position, x86_64_linux_call_registers[i][arg.size]);
+    }
 }
 
-static void routine_epilog(String_Builder* out) {
+static void routine_epilog(String_Builder* out, Op op) {
+    Arg return_value = op.return_routine.ret;
+    if (return_value.position == 0) sb_appendf(out, "    xor rax, rax\n");
+    else {
+        const char* reg = x86_64_linux_rax_registers[return_value.size];
+        switch (return_value.type) {
+            // TODO: just strings for now
+            case Offset: sb_appendf(out, "    movabs rax, offset .str_%zu\n", return_value.position); break;
+            case Position: sb_appendf(out, "    mov %s, [rbp - %zu]\n", reg, return_value.position); break;
+            case Value: sb_appendf(out, "    mov %s, ", reg); insert_immediate(out, return_value); break;
+            default: UNREACHABLE("Invalid Arg type");
+        }
+    }
+
     sb_appendf(out, "    mov rsp, rbp\n");
-    sb_appendf(out, "    xor rax, rax\n");
     sb_appendf(out, "    pop rbp\n");
     sb_appendf(out, "    ret\n");
 }
@@ -300,7 +323,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
         switch (op.type) {
             case RoutineCall: routine_call(out, op); break;
             case NewRoutine: routine_prolog(out, op); break;
-            case RtReturn: routine_epilog(out); break;
+            case RtReturn: routine_epilog(out, op); break;
             case AssignLocal: assign_local(out, op); break;
             case Binary: binary_operation(out, op); break;
             case JumpIfNot: jump_if_not(out, op); break;

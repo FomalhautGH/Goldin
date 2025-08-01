@@ -8,10 +8,26 @@
 #include "nob.h"
 #include "stb_ds.h"
 
+typedef enum {
+    Byte, 
+    Word, 
+    DWord, 
+    QWord 
+} Size;
+
 typedef struct {
-    enum { Byte, Word, DWord, QWord } size;
-    enum { Position, Value, Offset } type;
-    union { int64_t buffer; size_t position; const char* string; };
+    Size size;
+    enum { 
+        Position,
+        Value,
+        Offset,
+        ReturnVal
+    } type;
+    union { 
+        int64_t buffer;
+        size_t position;
+        const char* string;
+    };
 } Arg;
 
 typedef enum {
@@ -35,8 +51,8 @@ typedef struct {
     } type;
 
     union {
-        struct { const char* name; size_t bytes; } new_routine;
-        struct { } routine_ret;
+        struct { const char* name; size_t bytes; Arg* args; } new_routine;
+        struct { Arg ret; } return_routine;
         struct { Arg offset_dst; Arg arg; } assign_loc;
         struct { const char* name; Arg* args; } routine_call;
         struct { Arg offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
@@ -52,8 +68,8 @@ typedef struct {
 #define OpJumpIfNot(label, arg) (Op) {.type = JumpIfNot, .jump_if_not = { label, arg }}
 #define OpJump(label) (Op) {.type = Jump, .jump = { label }}
 #define OpLabel(index) (Op) {.type = Label, .label = { index }}
-#define OpNewRoutine(name, bytes) (Op) { .type = NewRoutine, .new_routine = { name, bytes }}
-#define OpReturn() (Op) { .type = RtReturn }
+#define OpNewRoutine(name, bytes, args) (Op) { .type = NewRoutine, .new_routine = { name, bytes, args }}
+#define OpReturn(arg) (Op) { .type = RtReturn, .return_routine.ret = arg }
 
 #define X86_64_LINUX_CALL_REGISTERS_NUM 6
 
