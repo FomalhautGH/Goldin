@@ -1,10 +1,10 @@
 #include "lexer.h"
 #include "token.h"
-#include <stddef.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
 
+static bool statement();
 static bool block_statement();
 static bool while_statement();
 static bool compile_expression(Arg* arg);
@@ -184,7 +184,10 @@ static bool routine_call(Arg* arg, const char* name) {
 
     push_op(OpRoutineCall(name, args));
     if (!expect_and_consume(RightParen)) return false;
-    if (arg) arg->type = ReturnVal;
+    if (arg) {
+        arg->type = ReturnVal;
+        arg->size = DWord;
+    }
     return true;
 }
 
@@ -222,7 +225,12 @@ static bool compile_binop(Arg* arg) {
         case Minus: binop = Sub; break;
         case Star: binop = Mul; break;
         case Slash: binop = Div; break;
+        case EqualEqual: size = Byte; binop = Eq; break;
         case Less: size = Byte; binop = Lt; break;
+        case LessEqual: size = Byte; binop = Le; break;
+        case Greater: size = Byte; binop = Gt; break;
+        case GreaterEqual: size = Byte; binop = Ge; break;
+        case BangEqual: size = Byte; binop = Ne; break;
         default: UNREACHABLE("");
     }
 
@@ -278,6 +286,11 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
             case Plus: 
             case Minus: 
             case Star:
+            case GreaterEqual:
+            case Greater:
+            case EqualEqual:
+            case BangEqual:
+            case LessEqual:
             case Less: return compile_binop(arg);
             case Slash: TODO("Unsupported div op"); break;
             default: goto end_expr;
@@ -418,13 +431,13 @@ static bool if_statement() {
     if (!expect_and_consume(RightParen)) return false;
 
     size_t end_if_block = push_op(OpJumpIfNot(0, cond));
-    if (!block_statement()) return false;
+    if (!statement()) return false;
 
     if (get_type() == Else) {
         consume();
         size_t end_else_block = push_op(OpJump(0));
         comp.ops[end_if_block].jump_if_not.label = push_label_op();
-        if (!block_statement()) return false;
+        if (!statement()) return false;
         comp.ops[end_else_block].jump.label = push_label_op();
     } else {
         comp.ops[end_if_block].jump_if_not.label = push_label_op();

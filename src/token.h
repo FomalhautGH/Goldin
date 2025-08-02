@@ -32,8 +32,12 @@ typedef enum {
     VarTypef64,
 
     Equal,
+    EqualEqual,
+    BangEqual,
     Greater,
     Less,
+    GreaterEqual,
+    LessEqual,
     Plus,
     Minus,
     Star,

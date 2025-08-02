@@ -19,6 +19,10 @@ static const char* x86_64_linux_rax_registers[] = {
     "al", "ax", "eax", "rax"
 };
 
+static const char* x86_64_linux_rbx_registers[] = {
+    "bl", "bx", "ebx", "rbx"
+};
+
 static int8_t get_byte(Arg arg) {
     int8_t result = 0;
     memcpy(&result, &arg.buffer, sizeof(int8_t));
@@ -100,14 +104,17 @@ static void routine_call(String_Builder* out, Op op) {
 }
 
 static void binary_operation_load_factor(String_Builder* out, Arg arg, const char* ins) {
-    sb_appendf(out, "    %s %s, ", ins, x86_64_linux_rax_registers[arg.size]);
+    sb_appendf(out, "    %s %s, ", ins, x86_64_linux_rbx_registers[arg.size]);
 
     switch (arg.type) {
-        case Value: insert_immediate(out, arg); break;
-        case Position: {
-           insert_ptr_dimension(out, arg);
-           sb_appendf(out, " ptr [rbp - %zu]", arg.position);
+        case Value: {
+            insert_immediate(out, arg);
         } break;
+        case Position: {
+            insert_ptr_dimension(out, arg);
+            sb_appendf(out, " ptr [rbp - %zu]", arg.position);
+        } break;
+        case ReturnVal: sb_appendf(out, "%s", x86_64_linux_rax_registers[arg.size]); break;
         default: UNREACHABLE("Invalid Arg type");
     }
 
@@ -115,7 +122,7 @@ static void binary_operation_load_factor(String_Builder* out, Arg arg, const cha
 }
 
 static void binary_operation_load_dst(String_Builder* out, Arg dst) {
-    const char* reg = x86_64_linux_rax_registers[dst.size];
+    const char* reg = x86_64_linux_rbx_registers[dst.size];
     if (dst.type != Position) UNREACHABLE("Destination Arg can only be of the position type");
 
     sb_appendf(out, "    mov ");
@@ -123,10 +130,10 @@ static void binary_operation_load_dst(String_Builder* out, Arg dst) {
     sb_appendf(out, " ptr [rbp - %zu], %s\n", dst.position, reg);
 }
 
-static void binary_operation_load_cmp_dst(String_Builder* out, Arg dst) {
+static void binary_operation_load_cmp_dst(String_Builder* out, Arg dst, const char* instr) {
     if (dst.type != Position) UNREACHABLE("Destination Arg can only be of the position type");
     if (dst.size != Byte) UNREACHABLE("Destination Arg con only be of size byte");
-    sb_appendf(out, "    setl al\n");
+    sb_appendf(out, "    %s al\n", instr);
     sb_appendf(out, "    mov byte ptr [rbp - %zu], al\n", dst.position);
 }
 
@@ -145,10 +152,6 @@ static void binary_operation_sub(String_Builder* out, Op op) {
     Arg rhs = op.binop.rhs;
     Arg dst = op.binop.offset_dst;
 
-    // TODO: support typecheking in expressions in order to always have the same size
-    assert(lhs.size == rhs.size);
-    assert(lhs.size == dst.size);
-
     binary_operation_load_factor(out, lhs, "mov");
     binary_operation_load_factor(out, rhs, "sub");
     binary_operation_load_dst(out, dst);
@@ -159,17 +162,19 @@ static void binary_operation_mul(String_Builder* out, Op op) {
     Arg rhs = op.binop.rhs;
     Arg dst = op.binop.offset_dst;
 
-    // TODO: support typecheking in expressions in order to always have the same size
-    assert(lhs.size == rhs.size);
-    assert(lhs.size == dst.size);
-
     // TODO: Use imul with 3 arguments since it exists in x64
-    binary_operation_load_factor(out, lhs, "mov");
-    binary_operation_load_factor(out, rhs, "imul");
-    binary_operation_load_dst(out, dst);
+    assert(lhs.type == Position && rhs.type == ReturnVal);
+
+    const char* reg = x86_64_linux_rbx_registers[lhs.size];
+    sb_appendf(out, "    mov %s, ", reg);
+    insert_ptr_dimension(out, lhs);
+    sb_appendf(out, " ptr [rbp - %zu]\n", lhs.position);
+
+    sb_appendf(out, "    imul %s, %s\n", reg, x86_64_linux_rax_registers[rhs.size]);
+    sb_appendf(out, "    mov [rbp - %zu], %s\n", dst.position, reg);
 }
 
-static void binary_operation_lessthan(String_Builder* out, Op op) {
+static void binary_operation_cmp(String_Builder* out, Op op, const char* instr) {
     Arg lhs = op.binop.lhs;
     Arg rhs = op.binop.rhs;
     Arg dst = op.binop.offset_dst;
@@ -179,7 +184,7 @@ static void binary_operation_lessthan(String_Builder* out, Op op) {
 
     binary_operation_load_factor(out, lhs, "mov");
     binary_operation_load_factor(out, rhs, "cmp");
-    binary_operation_load_cmp_dst(out, dst);
+    binary_operation_load_cmp_dst(out, dst, instr);
 }
 
 static void binary_operation(String_Builder* out, Op op) {
@@ -189,7 +194,14 @@ static void binary_operation(String_Builder* out, Op op) {
         case Add: binary_operation_add(out, op); break;
         case Sub: binary_operation_sub(out, op); break;
         case Mul: binary_operation_mul(out, op); break;
-        case Lt: binary_operation_lessthan(out, op); break;
+        // TODO: these instructions are all signed 
+        // https://cs.brown.edu/courses/cs033/docs/guides/x64_cheatsheet.pdf
+        case Eq: binary_operation_cmp(out, op, "sete"); break;
+        case Lt: binary_operation_cmp(out, op, "setl"); break;
+        case Le: binary_operation_cmp(out, op, "setle"); break;
+        case Gt: binary_operation_cmp(out, op, "setg"); break;
+        case Ge: binary_operation_cmp(out, op, "setge"); break;
+        case Ne: binary_operation_cmp(out, op, "setne"); break;
         default: TODO("Binary operation unsupported yet");
     } 
 }
@@ -289,7 +301,11 @@ static void routine_epilog(String_Builder* out, Op op) {
             // TODO: just strings for now
             case Offset: sb_appendf(out, "    movabs rax, offset .str_%zu\n", return_value.position); break;
             case Position: sb_appendf(out, "    mov %s, [rbp - %zu]\n", reg, return_value.position); break;
-            case Value: sb_appendf(out, "    mov %s, ", reg); insert_immediate(out, return_value); break;
+            case Value: {
+                sb_appendf(out, "    mov %s, ", reg); 
+                insert_immediate(out, return_value);
+                sb_appendf(out, "\n");
+            } break;
             default: UNREACHABLE("Invalid Arg type");
         }
     }

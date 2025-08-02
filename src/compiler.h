@@ -36,6 +36,11 @@ typedef enum {
     Mul,
     Div,
     Lt,
+    Gt,
+    Le,
+    Ge,
+    Eq,
+    Ne
 } Binop;
 
 typedef struct {

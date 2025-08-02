@@ -1,19 +1,9 @@
-rt funzione(i32 value) {
-    i32 i = 0;
-    while (i < value * 2) {
-        if (i < value) {
-            printf("Il valore e' %d\n", i);
-        } else {
-            printf("Troppo grosso\n");
-        }
-
-        i = i + 1;
-    }
-
-    ret value + i;
+rt factorial(i32 num) {
+    if (num == 0) ret 1;
+    ret num * factorial(num - 1);
 }
 
 rt main() {
-    i32 x = funzione(10);
-    printf("Result: %d\n", x);
+    i32 result = factorial(12);
+    printf("Result: %d\n", result);
 }

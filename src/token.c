@@ -18,8 +18,12 @@ const char* display_type(TokenType type) {
         case Comma: return ",";
         case Slash: return "/";
         case Equal: return "=";
+        case EqualEqual: return "==";
         case Greater: return ">";
         case Less: return "<";
+        case GreaterEqual: return ">=";
+        case LessEqual: return "<=";
+        case BangEqual: return "!=";
         case Plus: return "+";
         case Minus: return "-";
         case Star: return "*";
