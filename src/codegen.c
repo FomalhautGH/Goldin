@@ -2,7 +2,9 @@
 #include "compiler.h"
 #include "token.h"
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #define DIMENTIONS 4
 
@@ -22,6 +24,17 @@ static const char* x86_64_linux_rax_registers[] = {
 static const char* x86_64_linux_rbx_registers[] = {
     "bl", "bx", "ebx", "rbx"
 };
+
+static size_t round_to_next_pow2(size_t value) {
+    --value;
+    value |= value >> 1;
+    value |= value >> 2;
+    value |= value >> 4;
+    value |= value >> 8;
+    value |= value >> 16;
+    value |= value >> 32;
+    return ++value;
+}
 
 static int8_t get_byte(Arg arg) {
     int8_t result = 0;
@@ -86,6 +99,12 @@ static void routine_call_arg_offset(String_Builder* out, Arg arg, size_t reg_ind
     sb_appendf(out, "    movabs %s, offset .str_%zu\n", x86_64_linux_call_registers[reg_index][QWord], arg.position);
 }
 
+static void routine_call_arg_returnval(String_Builder* out, Arg arg, size_t reg_index) {
+    const char* reg = x86_64_linux_call_registers[reg_index][arg.size];
+    const char* return_reg = x86_64_linux_rax_registers[arg.size];
+    sb_appendf(out, "    mov %s, %s\n", reg, return_reg);
+}
+
 static void routine_call(String_Builder* out, Op op) {
     Arg* args = op.routine_call.args;
 
@@ -95,11 +114,13 @@ static void routine_call(String_Builder* out, Op op) {
             case Value: routine_call_arg_value(out, arg, i); break;
             case Position: routine_call_arg_position(out, arg, i); break;
             case Offset: routine_call_arg_offset(out, arg, i); break;
+            case ReturnVal: routine_call_arg_returnval(out, arg, i); break;
             default: UNREACHABLE("Invalid Arg type");
         }
     }
 
-    sb_appendf(out, "    mov al, 0\n"); // TODO: Support variadics
+    // TODO: Support variadics
+    if (strcmp(op.routine_call.name, "printf") == 0) sb_appendf(out, "    mov al, 0\n"); 
     sb_appendf(out, "    call %s\n", op.routine_call.name);
 }
 
@@ -243,11 +264,32 @@ static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
             sb_appendf(out, "\n");
         } break;
         case Position: {
-            const char* reg_arg = x86_64_linux_rax_registers[arg.size];
+            const char* instr = NULL;
             const char* reg_dst = x86_64_linux_rax_registers[dst.size];
-            sb_appendf(out, "    mov %s, ", reg_arg);
-            insert_ptr_dimension(out, arg);
+            const char* reg_arg = reg_dst;
+
+            if (dst.size <= arg.size) {
+                instr = "mov";
+            } else if (arg.is_signed) {
+                if (arg.size == DWord) {
+                    instr = "movsxd";
+                } else {
+                    instr = "movsx";
+                }
+            } else {
+                if (arg.size == DWord) {
+                    reg_arg = x86_64_linux_rax_registers[arg.size];
+                    instr = "mov";
+                } else {
+                    instr = "movzx";
+                }
+            }
+
+            sb_appendf(out, "    %s %s, ", instr, reg_arg);
+            if (dst.size <= arg.size) insert_ptr_dimension(out, dst);
+            else insert_ptr_dimension(out, arg);
             sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
+
             sb_appendf(out, "    mov ");
             insert_ptr_dimension(out, dst);
             sb_appendf(out, " ptr [rbp - %zu], ", dst.position);
@@ -284,7 +326,7 @@ static void routine_prolog(String_Builder* out, Op op) {
     sb_appendf(out, "    mov rbp, rsp\n");
 
     size_t bytes = op.new_routine.bytes;
-    if (bytes > 0) sb_appendf(out, "    sub rsp, %ld\n", bytes);
+    if (bytes > 0) sb_appendf(out, "    sub rsp, %ld\n", round_to_next_pow2(bytes));
 
     for (size_t i = 0; i < arrlenu(op.new_routine.args); ++i) {
         Arg arg = op.new_routine.args[i];

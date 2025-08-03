@@ -28,6 +28,8 @@ typedef enum {
     VarTypeu16,
     VarTypeu32,
     VarTypeu64,
+
+    // TODO: Floats unsupported yet
     VarTypef32,
     VarTypef64,
 

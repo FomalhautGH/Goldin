@@ -1,5 +1,7 @@
 #include "lexer.h"
 #include "token.h"
+#include <stdbool.h>
+#include <stdint.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
@@ -37,12 +39,6 @@ static size_t push_label_op() {
     comp.label_index += 1;
 
     return index;
-}
-
-static void position_arg(Arg* arg_ptr, Size size, size_t position) {
-    arg_ptr->size = size;
-    arg_ptr->type = Position;
-    arg_ptr->position = position;
 }
 
 static Token consume() {
@@ -87,10 +83,29 @@ static Arg find_local_var(const char* name) {
     return (Arg){0};
 }
 
-static Size get_var_size() {
+static bool is_var_signed(TokenType var_type) {
+    switch (var_type) {
+        case VarTypeu8:
+        case VarTypeu16:
+        case VarTypeu32:
+        case VarTypeu64: return false;
+
+        case VarTypei8: 
+        case VarTypei16:
+        case VarTypei32:
+        case VarTypei64: return true;
+
+        case VarTypef32: 
+        case VarTypef64: UNREACHABLE("Tecnically true");
+
+        default: UNREACHABLE("Not a valid var type");
+    }
+}
+
+static Size get_var_size(TokenType var_type) {
     Size size = 0;
 
-    switch (get_type()) {
+    switch (var_type) {
         case VarTypeu8:
         case VarTypei8: size = Byte; break;
 
@@ -110,29 +125,25 @@ static Size get_var_size() {
     return size;
 }
 
-static bool declare_variable(TokenType var_type, const char* name) {
-    Size size = 0;
-    switch (var_type) {
-        case VarTypeu8:
-        case VarTypei8: size = Byte; comp.position += 1; break;
-
-        case VarTypeu16:
-        case VarTypei16: size = Word; comp.position += 2; break;
-
-        case VarTypef32: 
-        case VarTypeu32:
-        case VarTypei32: size = DWord; comp.position += 4; break;
-
-        case VarTypef64: 
-        case VarTypeu64:
-        case VarTypei64: size = QWord; comp.position += 8; break;
-        default: UNREACHABLE("Not a valid var type");
+static void alloc_size(Size size) {
+    switch (size) {
+        case Byte: comp.position += 1; break;
+        case Word: comp.position += 2; break;
+        case DWord: comp.position += 4; break;
+        case QWord: comp.position += 8; break;
+        default: UNREACHABLE("Invalid Arg size");
     }
+}
+
+static bool declare_variable(TokenType var_type, const char* name) {
+    Size size = get_var_size(var_type);
+    alloc_size(size);
 
     Arg var = {
         .position = comp.position,
         .type = Position,
-        .size = size
+        .size = size,
+        .is_signed = is_var_signed(var_type)
     };
 
     size_t last = arrlenu(comp.local_vars) - 1;
@@ -146,12 +157,17 @@ static void print_current_type() {
 
 static bool int_literal_to_arg(Arg* arg) {
     // TODO: Check errno in convertions and overflow if literal too big
-    int32_t value = strtol(get_value().items, NULL, 10);
-    arg->size = DWord;
-    arg->type = Value;
-    memcpy(&arg->buffer, &value, sizeof(int32_t));
-    consume();
+    int64_t value = strtol(get_value().items, NULL, 10);
 
+    *arg = (Arg) {
+        .size = QWord,
+        .type = Value,
+        .is_signed = true
+    };
+
+    memcpy(&arg->buffer, &value, sizeof(int64_t));
+
+    consume(); // Consume IntLiteral
     return true;
 }
 
@@ -186,14 +202,14 @@ static bool routine_call(Arg* arg, const char* name) {
     if (!expect_and_consume(RightParen)) return false;
     if (arg) {
         arg->type = ReturnVal;
-        arg->size = DWord;
+        arg->size = QWord;
     }
     return true;
 }
 
 static bool identifier_expression(Arg* arg) {
     const char* name = strdup(get_value().items);
-    consume();
+    consume(); // Consume Identifier
     
     if (get_type() == LeftParen) {
         if (!routine_call(arg, name)) return false;
@@ -206,14 +222,19 @@ static bool identifier_expression(Arg* arg) {
         return false;
     }
     
-    position_arg(arg, var.size, var.position);
+    *arg = (Arg) {
+        .type = Position,
+        .size = var.size,
+        .position = var.position,
+        .is_signed = var.is_signed
+    };
+
     return true;
 }
 
 static bool compile_binop(Arg* arg) {
     TokenType op_type = get_type();
     Arg rhs = {0};
-    Arg dst = {0};
 
     consume();
     if (!compile_expression_wrapped(&rhs, op_type)) return false;
@@ -234,33 +255,45 @@ static bool compile_binop(Arg* arg) {
         default: UNREACHABLE("");
     }
 
-    switch (size) {
-        case Byte: comp.position += 1; break;
-        case Word: comp.position += 2; break;
-        case DWord: comp.position += 4; break;
-        case QWord: comp.position += 8; break;
-        default: UNREACHABLE("Invalid Arg size");
-    }
+    alloc_size(size);
+    
+    Arg dst = {
+        .type = Position,
+        .size = size,
+        .position = comp.position,
+        .is_signed = false // TODO: do not hardcode this
+    };
 
-    position_arg(&dst, size, comp.position);
     push_op(OpBinary(dst, binop, *arg, rhs));
-    position_arg(arg, size, comp.position);
+
+    *arg = (Arg) {
+        .type = Position,
+        .size = size,
+        .position = comp.position,
+        .is_signed = false // TODO: do not hardcode this
+    };
 
     return true;
 }
 
 static bool string_literal_to_arg(Arg* arg) {
-    arg->size = QWord;
-    arg->type = Offset;
-    arg->position = arrlenu(comp.data);
+    *arg = (Arg) {
+        .type = Offset,
+        .size = QWord,
+        .position = arrlenu(comp.static_data),
+        .is_signed = false
+    };
 
-    Arg data = {0};
-    data.size = QWord;
-    data.type = Offset;
-    data.string = strdup(get_value().items);
-    arrpush(comp.data, data);
+    Arg data = {
+        .size = QWord,
+        .type = Offset,
+        .is_signed = false,
+        .string = strdup(get_value().items)
+    };
 
-    consume();
+    arrpush(comp.static_data, data);
+
+    consume(); // Consume StringLiteral
     return true;
 }
 
@@ -306,8 +339,7 @@ static bool compile_expression(Arg* arg) {
 }
 
 static bool assignment(const char* name) {
-    // TODO: change vartype depending on which variable we are assigning
-    TokenType var_type = VarTypei64;
+    consume(); // Consume Equal
 
     Arg var = find_local_var(name);
     if (var.position == 0) {
@@ -316,61 +348,35 @@ static bool assignment(const char* name) {
     }
 
     Arg arg = {0};
-    Arg dst = {0};
-    consume();
-
-    Size size = 0;
-    switch (var_type) {
-        case VarTypeu8:
-        case VarTypei8: size = Byte; break;
-        case VarTypeu16:
-        case VarTypei16: size = Word; break;
-        case VarTypef32: 
-        case VarTypeu32:
-        case VarTypei32: size = DWord; break;
-        case VarTypef64:
-        case VarTypeu64:
-        case VarTypei64: size = QWord; break;
-        default: UNREACHABLE("Not a valid var type");
-    }
-
-    arg.size = size;
-    dst.size = size;
-
+    arg.size = var.size;
     if (!compile_expression(&arg)) return false;
-    position_arg(&dst, var.size, var.position);
+
+    Arg dst = {
+        .type = Position,
+        .size = var.size,
+        .position = var.position,
+        .is_signed = var.is_signed
+    };
     push_op(OpAssignLocal(dst, arg));
+
     free((void*)name);
     return true;
 }
 
-
 static bool variable_initialization(TokenType var_type) {
+    consume(); // Consume Equals
+
     Arg arg = {0};
-    Arg dst = {0};
-    consume();
-
-    Size size = 0;
-    switch (var_type) {
-        case VarTypeu8:
-        case VarTypei8: size = Byte; break;
-        case VarTypeu16:
-        case VarTypei16: size = Word; break;
-        case VarTypef32: 
-        case VarTypeu32:
-        case VarTypei32: size = DWord; break;
-        case VarTypef64:
-        case VarTypeu64:
-        case VarTypei64: size = QWord; break;
-        default: UNREACHABLE("Not a valid var type");
-    }
-
-    arg.size = size;
-    dst.size = size;
+    Arg dst = {
+        .size = get_var_size(var_type),
+        .type = Position,
+        .position = 0,
+        .is_signed = is_var_signed(var_type)
+    };
 
     size_t current_position = comp.position;
     if (!compile_expression(&arg)) return false;
-    position_arg(&dst, size, current_position);
+    dst.position = current_position;
     push_op(OpAssignLocal(dst, arg));
 
     if (!expect_and_consume(SemiColon)) return false;
@@ -418,6 +424,7 @@ static bool return_statement() {
     consume();
     Arg arg = {0};
     compile_expression(&arg);
+    comp.returned = true;
     push_op(OpReturn(arg));
     return true;
 }
@@ -512,52 +519,67 @@ static bool while_statement() {
 }
 
 static bool routine_argument(Arg* args[]) {
-    TokenType type = get_type();
-    Size size = get_var_size();
-    consume();
+    TokenType var_type = get_type();
+    consume(); // Consume VarType
 
     const char* name = strdup(get_value().items);
-    consume();
-    declare_variable(type, name);
+    consume(); // Consume Identifier
+    declare_variable(var_type, name);
 
     Arg arg = {
-        .size = size,
+        .size = get_var_size(var_type),
         .type = Position,
-        .position = comp.position
+        .position = comp.position,
+        .is_signed = is_var_signed(var_type)
     };
 
     arrpush(*args, arg);
     return true;
 }
 
-static bool compile_routine_body() {
-    consume();
-    const char* name = strdup(get_value().items);
-    consume();
-
-    Arg* args = NULL;
-    size_t prev_pos = comp.position;
-    comp.position = 0;
-    size_t rt = push_op(OpNewRoutine(name, 0, NULL));
-
-    arrpush(comp.local_vars, NULL);
-
+static bool compile_routine_arguments(Arg* args[]) {
     if (!expect_and_consume(LeftParen)) return false;
     while (get_type() != RightParen) {
-        if (!routine_argument(&args)) return false;
+        if (!routine_argument(args)) return false;
         if (get_type() == Comma) consume(); 
     }
     if (!expect_and_consume(RightParen)) return false;
+    return true;
+}
 
+static bool compile_routine_body() {
     if (!expect_and_consume(LeftBracket)) return false;
     while (!is_eof() && get_type() != RightBracket) {
         if (!statement()) return false;
     }
     if (!expect_and_consume(RightBracket)) return false;
+    return true;
+}
 
-    push_op(OpReturn((Arg){0}));
+static bool compile_routine() {
+    consume(); // Consume Routine
+    if (!expect_type(Identifier)) return false;
+    const char* routine_name = strdup(get_value().items);
+    consume(); // Consume Identifier
+
+    size_t rt = push_op(OpNewRoutine(routine_name, 0, NULL));
+
+    size_t prev_pos = comp.position;
+    comp.position = 0;
+    arrpush(comp.local_vars, NULL);
+
+    Arg* args = NULL;
+    if (!compile_routine_arguments(&args)) return false;
+    if (!compile_routine_body()) return false;
+
+    // TODO: support the case in which the return is generated but not
+    // executed, like in a if statement
+    if (!comp.returned) push_op(OpReturn((Arg){0}));
+    else comp.returned = false;
+
     comp.ops[rt].new_routine.bytes = comp.position;
     comp.ops[rt].new_routine.args = args;
+
     comp.position = prev_pos;
     arrpop(comp.local_vars);
     return true;
@@ -566,14 +588,15 @@ static bool compile_routine_body() {
 void init_compiler() {
     comp.position = 0;
     comp.label_index = 0;
-    comp.data = NULL;
+    comp.static_data = NULL;
     comp.ops = NULL;
     comp.local_vars = NULL;
+    comp.returned = false;
 }
 
 void free_compiler() {
     for (size_t i = 0; i < arrlenu(comp.local_vars); ++i) shfree(comp.local_vars[i]);
-    arrfree(comp.data);
+    arrfree(comp.static_data);
     arrfree(comp.ops);
     arrfree(comp.local_vars);
 }
@@ -583,7 +606,7 @@ Op* get_ops() {
 }
 
 Arg* get_data() {
-    return comp.data;
+    return comp.static_data;
 }
 
 bool generate_ops() {
@@ -594,7 +617,7 @@ bool generate_ops() {
         switch (current_token.type) {
             case Eof: return true;
             case ParseError: return false;
-            case Routine: if (!compile_routine_body()) return false; break;
+            case Routine: if (!compile_routine()) return false; break;
             default: {
                 error_msg("COMPILATION ERROR: A program file is composed by only routines");
                 return false;

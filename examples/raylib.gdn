@@ -1,0 +1,19 @@
+rt main() {
+    i32 screenWidth = 800;
+    i32 screenHeight = 450;
+
+    InitWindow(screenWidth, screenHeight, "Window from Goldin");
+    SetTargetFPS(60);
+
+    while (WindowShouldClose() == 0) {
+        BeginDrawing();
+
+        ClearBackground(GetColor(0));
+        DrawText("Hi from Goldin", 350, 200, 20, GetColor(4294967295));
+
+        EndDrawing();
+    }
+
+    CloseWindow();
+    ret 0;
+}

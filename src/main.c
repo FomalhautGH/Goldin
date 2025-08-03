@@ -57,11 +57,12 @@ int main(int argc, char** argv) {
     fclose(assembly);
 
     if (output_path.count > 0) {
-        Cmd compile = {0};
-        nob_cc(&compile);
-        nob_cc_output(&compile, output_path.items);
-        nob_cc_inputs(&compile, asm_file.items);
-        if (!cmd_run_sync_and_reset(&compile)) exit(FAILED_CMD);
+        Cmd assemble = {0};
+        nob_cc(&assemble);
+        nob_cmd_append(&assemble, "-lraylib");
+        nob_cc_output(&assemble, output_path.items);
+        nob_cc_inputs(&assemble, asm_file.items);
+        if (!cmd_run_sync_and_reset(&assemble)) exit(FAILED_CMD);
     }
 
     sb_free(asm_file);
