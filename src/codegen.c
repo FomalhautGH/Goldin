@@ -3,6 +3,7 @@
 #include "token.h"
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #define DIMENTIONS 4
 
@@ -86,6 +87,12 @@ static void routine_call_arg_offset(String_Builder* out, Arg arg, size_t reg_ind
     sb_appendf(out, "    movabs %s, offset .str_%zu\n", x86_64_linux_call_registers[reg_index][QWord], arg.position);
 }
 
+static void routine_call_arg_returnval(String_Builder* out, Arg arg, size_t reg_index) {
+    const char* reg = x86_64_linux_call_registers[reg_index][arg.size];
+    const char* return_reg = x86_64_linux_rax_registers[arg.size];
+    sb_appendf(out, "    mov %s, %s\n", reg, return_reg);
+}
+
 static void routine_call(String_Builder* out, Op op) {
     Arg* args = op.routine_call.args;
 
@@ -95,11 +102,13 @@ static void routine_call(String_Builder* out, Op op) {
             case Value: routine_call_arg_value(out, arg, i); break;
             case Position: routine_call_arg_position(out, arg, i); break;
             case Offset: routine_call_arg_offset(out, arg, i); break;
+            case ReturnVal: routine_call_arg_returnval(out, arg, i); break;
             default: UNREACHABLE("Invalid Arg type");
         }
     }
 
-    sb_appendf(out, "    mov al, 0\n"); // TODO: Support variadics
+    // TODO: Support variadics
+    if (strcmp(op.routine_call.name, "printf") == 0) sb_appendf(out, "    mov al, 0\n"); 
     sb_appendf(out, "    call %s\n", op.routine_call.name);
 }
 
@@ -243,11 +252,32 @@ static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
             sb_appendf(out, "\n");
         } break;
         case Position: {
-            const char* reg_arg = x86_64_linux_rax_registers[arg.size];
+            const char* instr = NULL;
             const char* reg_dst = x86_64_linux_rax_registers[dst.size];
-            sb_appendf(out, "    mov %s, ", reg_arg);
-            insert_ptr_dimension(out, arg);
+            const char* reg_arg = reg_dst;
+
+            if (dst.size <= arg.size) {
+                instr = "mov";
+            } else if (arg.is_signed) {
+                if (arg.size == DWord) {
+                    instr = "movsxd";
+                } else {
+                    instr = "movsx";
+                }
+            } else {
+                if (arg.size == DWord) {
+                    reg_arg = x86_64_linux_rax_registers[arg.size];
+                    instr = "mov";
+                } else {
+                    instr = "movzx";
+                }
+            }
+
+            sb_appendf(out, "    %s %s, ", instr, reg_arg);
+            if (dst.size <= arg.size) insert_ptr_dimension(out, dst);
+            else insert_ptr_dimension(out, arg);
             sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
+
             sb_appendf(out, "    mov ");
             insert_ptr_dimension(out, dst);
             sb_appendf(out, " ptr [rbp - %zu], ", dst.position);

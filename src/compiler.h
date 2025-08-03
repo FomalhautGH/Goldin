@@ -2,7 +2,6 @@
 #define COMPILER_HEADER
 
 #include "lexer.h"
-#include <stddef.h>
 
 #define NOB_STRIP_PREFIX
 #include "nob.h"
@@ -17,6 +16,7 @@ typedef enum {
 
 typedef struct {
     Size size;
+    bool is_signed;
     enum { 
         Position,
         Value,
@@ -90,10 +90,11 @@ typedef struct {
 
 typedef struct {
     Op* ops;
-    Arg* data;
+    Arg* static_data;
     VarsHashmap** local_vars;
     size_t position;
     size_t label_index;
+    bool returned;
 } Compiler;
 
 void init_compiler();

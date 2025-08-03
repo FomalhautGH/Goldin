@@ -1,9 +1,7 @@
-rt factorial(i32 num) {
-    if (num == 0) ret 1;
-    ret num * factorial(num - 1);
-}
 
 rt main() {
-    i32 result = factorial(12);
-    printf("Result: %d\n", result);
+    u64 x = 69;
+    i32 y = x + 69;
+
+    printf("%d\n", y);
 }

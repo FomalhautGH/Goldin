@@ -104,7 +104,7 @@ static void parse_identifier() {
     lexer.line_number_start = lexer.line_number_end;
     lexer.line_offset_start = lexer.line_offset_end - 1;
     push_char(peek_prev());
-    while (isalnum(peek())) push_char(consume());
+    while (isalnum(peek()) || peek() == '_') push_char(consume());
     keyword_id();
 }
 
