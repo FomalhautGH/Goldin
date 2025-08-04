@@ -6,4 +6,5 @@ rt factorial(i32 num) {
 rt main() {
     i32 result = factorial(12);
     printf("Result: %d\n", result);
+    ret 0;
 }
