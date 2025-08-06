@@ -2,6 +2,7 @@
 #define COMPILER_HEADER
 
 #include "lexer.h"
+#include <stddef.h>
 
 #define NOB_STRIP_PREFIX
 #include "nob.h"

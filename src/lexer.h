@@ -1,7 +1,6 @@
 #ifndef LEXER_HEADER
 #define LEXER_HEADER
 
-#include <stdbool.h>
 #include "token.h"
 
 #define NOB_STRIP_PREFIX

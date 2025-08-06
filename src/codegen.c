@@ -1,10 +1,6 @@
 #include "codegen.h"
 #include "compiler.h"
 #include "token.h"
-#include <assert.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
 
 #define DIMENTIONS 4
 
@@ -60,7 +56,7 @@ static int64_t get_qword(Arg arg) {
     return result;
 }
 
-static void insert_immediate(String_Builder* out, Arg arg) {
+static void append_immediate(String_Builder* out, Arg arg) {
     switch (arg.size) {
         case Byte: sb_appendf(out, "%d", get_byte(arg)); break;
         case Word: sb_appendf(out, "%d", get_word(arg)); break;
@@ -70,8 +66,8 @@ static void insert_immediate(String_Builder* out, Arg arg) {
     }
 }
 
-static void insert_ptr_dimension(String_Builder* out, Arg arg) {
-    switch (arg.size) {
+static void append_ptr_dimension(String_Builder* out, Size size) {
+    switch (size) {
         case Byte: sb_appendf(out, "byte"); break;
         case Word: sb_appendf(out, "word"); break;
         case DWord: sb_appendf(out, "dword"); break;
@@ -80,17 +76,110 @@ static void insert_ptr_dimension(String_Builder* out, Arg arg) {
     }
 }
 
+static const char* right_mov(Destination dst, Arg src, const char** reg_arg) {
+    if (dst.size <= src.size) return "mov";
+
+    if (src.is_signed) {
+        if (src.size == DWord) return "movsxd";
+        return "movsx";
+    } 
+
+    if (src.size == DWord) {
+        *reg_arg = x86_64_linux_rbx_registers[src.size];
+        return "mov";
+    } else {
+        return "movzx";
+    }
+}
+
+static void mov_to_register(String_Builder* out, Destination dst, Arg arg) {
+    const char* dst_reg = dst.value.reg;
+
+    switch (arg.type) {
+        case Position: {
+            const char* reg_arg = x86_64_linux_rbx_registers[dst.size];
+            const char* mov_instr = right_mov(dst, arg, &reg_arg);
+
+            sb_appendf(out, "    %s %s, ", mov_instr, reg_arg);
+            if (dst.size <= arg.size) append_ptr_dimension(out, dst.size);
+            else append_ptr_dimension(out, arg.size);
+            sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
+        } break;
+        case Offset: {
+            assert(arg.size == QWord && dst.size == QWord);
+            sb_appendf(out, "    movabs %s, offset .str_%zu\n", dst_reg, arg.position);
+        } break;
+        case ReturnVal: {
+            sb_appendf(out, "    mov %s, %s\n", dst_reg, x86_64_linux_rax_registers[dst.size]);
+        } break;
+        case Value: {
+            sb_appendf(out, "    mov %s, ", dst_reg);
+            append_immediate(out, arg);
+            sb_appendf(out, "\n");
+        } break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
+}
+
+static void mov_to_memory(String_Builder* out, Destination dst, Arg arg) {
+    size_t dst_pos = dst.value.position;
+
+    switch (arg.type) {
+        case Position: {
+            const char* reg_dst = x86_64_linux_rbx_registers[dst.size];
+            const char* reg_arg = reg_dst;
+            const char* mov_instr = right_mov(dst, arg, &reg_arg);
+
+            sb_appendf(out, "    %s %s, ", mov_instr, reg_arg);
+            if (dst.size <= arg.size) append_ptr_dimension(out, dst.size);
+            else append_ptr_dimension(out, arg.size);
+            sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
+
+            sb_appendf(out, "    mov ");
+            append_ptr_dimension(out, dst.size);
+            sb_appendf(out, " ptr [rbp - %zu], ", dst_pos);
+            sb_appendf(out, "%s\n", reg_dst);
+        } break;
+        case Offset: {
+            sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.position);
+            sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst_pos);
+        } break;
+        case ReturnVal: {
+            const char* reg_arg = x86_64_linux_rax_registers[dst.size];
+            sb_appendf(out, "    mov ");
+            append_ptr_dimension(out, dst.size);
+            sb_appendf(out, " ptr [rbp - %zu], %s\n", dst_pos, reg_arg);
+        } break;
+        case Value: {
+            sb_appendf(out, "    mov ");
+            append_ptr_dimension(out, dst.size);
+            sb_appendf(out, " ptr [rbp - %zu], ", dst_pos);
+            append_immediate(out, arg);
+            sb_appendf(out, "\n");
+        } break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
+}
+
+static void mov(String_Builder* out, Destination dst, Arg arg) {
+    switch (dst.type) {
+        case Register: mov_to_register(out, dst, arg); break;
+        case Memory: mov_to_memory(out, dst, arg); break;
+        default: UNREACHABLE("Invalide Destination type");
+    }
+}
+
 static void routine_call_arg_value(String_Builder* out, Arg arg, size_t reg_index) {
     const char* reg = x86_64_linux_call_registers[reg_index][arg.size];
     sb_appendf(out, "    mov %s, ", reg);
-    insert_immediate(out, arg);
+    append_immediate(out, arg);
     sb_appendf(out, "\n");
 }
 
 static void routine_call_arg_position(String_Builder* out, Arg arg, size_t reg_index) {
     const char* reg = x86_64_linux_call_registers[reg_index][arg.size];
     sb_appendf(out, "    mov %s, ", reg);
-    insert_ptr_dimension(out, arg);
+    append_ptr_dimension(out, arg.size);
     sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
 }
 
@@ -129,10 +218,10 @@ static void binary_operation_load_factor(String_Builder* out, Arg arg, const cha
 
     switch (arg.type) {
         case Value: {
-            insert_immediate(out, arg);
+            append_immediate(out, arg);
         } break;
         case Position: {
-            insert_ptr_dimension(out, arg);
+            append_ptr_dimension(out, arg.size);
             sb_appendf(out, " ptr [rbp - %zu]", arg.position);
         } break;
         case ReturnVal: sb_appendf(out, "%s", x86_64_linux_rax_registers[arg.size]); break;
@@ -147,7 +236,7 @@ static void binary_operation_load_dst(String_Builder* out, Arg dst) {
     if (dst.type != Position) UNREACHABLE("Destination Arg can only be of the position type");
 
     sb_appendf(out, "    mov ");
-    insert_ptr_dimension(out, dst);
+    append_ptr_dimension(out, dst.size);
     sb_appendf(out, " ptr [rbp - %zu], %s\n", dst.position, reg);
 }
 
@@ -181,18 +270,37 @@ static void binary_operation_sub(String_Builder* out, Op op) {
 static void binary_operation_mul(String_Builder* out, Op op) {
     Arg lhs = op.binop.lhs;
     Arg rhs = op.binop.rhs;
-    Arg dst = op.binop.offset_dst;
+    Arg arg_dst = op.binop.offset_dst;
 
-    // TODO: Use imul with 3 arguments since it exists in x64
-    assert(lhs.type == Position && rhs.type == ReturnVal);
+    Destination dst = {
+        .type = Register,
+        .size = arg_dst.size,
+        .value.reg = x86_64_linux_rbx_registers[arg_dst.size]
+    };
 
-    const char* reg = x86_64_linux_rbx_registers[lhs.size];
-    sb_appendf(out, "    mov %s, ", reg);
-    insert_ptr_dimension(out, lhs);
-    sb_appendf(out, " ptr [rbp - %zu]\n", lhs.position);
+    mov(out, dst, lhs);
 
-    sb_appendf(out, "    imul %s, %s\n", reg, x86_64_linux_rax_registers[rhs.size]);
-    sb_appendf(out, "    mov [rbp - %zu], %s\n", dst.position, reg);
+    switch (rhs.type) {
+        case Position: {
+            const char* rbx_reg = x86_64_linux_rbx_registers[rhs.size];
+            sb_appendf(out, "    imul %s, [rbp - %zu]\n", rbx_reg, rhs.position);
+            sb_appendf(out, "    mov [rbp - %zu], %s\n", arg_dst.position, rbx_reg);
+        } break;
+        case ReturnVal: {
+            const char* rbx_reg = x86_64_linux_rbx_registers[lhs.size];
+            const char* rax_reg = x86_64_linux_rax_registers[lhs.size];
+            sb_appendf(out, "    imul %s, %s\n", rbx_reg, rax_reg);
+            sb_appendf(out, "    mov [rbp - %zu], %s\n", arg_dst.position, rbx_reg);
+        } break;
+        case Value: { 
+            const char* rbx_reg = x86_64_linux_rbx_registers[lhs.size];
+            sb_appendf(out, "    imul %s, %s, ", rbx_reg, rbx_reg);
+            append_immediate(out, rhs);
+            sb_appendf(out, "\n    mov [rbp - %zu], %s\n", arg_dst.position, rbx_reg);
+        } break;
+        case Offset: UNREACHABLE("Unsupported"); break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
 }
 
 static void binary_operation_cmp(String_Builder* out, Op op, const char* instr) {
@@ -201,7 +309,7 @@ static void binary_operation_cmp(String_Builder* out, Op op, const char* instr) 
     Arg dst = op.binop.offset_dst;
 
     // TODO: support typecheking in expressions in order to always have the same size
-    assert(lhs.size == rhs.size);
+    // assert(lhs.size == rhs.size);
 
     binary_operation_load_factor(out, lhs, "mov");
     binary_operation_load_factor(out, rhs, "cmp");
@@ -234,9 +342,9 @@ static void jump_if_not(String_Builder* out, Op op) {
     sb_appendf(out, "    mov %s, ", reg);
 
     switch (arg.type) {
-        case Value: insert_immediate(out, arg); break;
+        case Value: append_immediate(out, arg); break;
         case Position: {
-            insert_ptr_dimension(out, arg);
+            append_ptr_dimension(out, arg.size);
             sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
         } break;
         default: UNREACHABLE("Invalid Arg type");
@@ -254,59 +362,16 @@ static void label(String_Builder* out, Op op) {
     sb_appendf(out, ".in_%zu:\n", op.label.index);
 }
 
-static void assign_local_value(String_Builder* out, Arg dst, Arg arg) {
-    switch (arg.type) {
-        case Value: {
-            sb_appendf(out, "    mov ");
-            insert_ptr_dimension(out, dst);
-            sb_appendf(out, " ptr [rbp - %zu], ", dst.position);
-            insert_immediate(out, arg);
-            sb_appendf(out, "\n");
-        } break;
-        case Position: {
-            const char* instr = NULL;
-            const char* reg_dst = x86_64_linux_rax_registers[dst.size];
-            const char* reg_arg = reg_dst;
+static void assign_local_value(String_Builder* out, Arg arg_dst, Arg arg) {
+    assert(arg_dst.type == Position);
 
-            if (dst.size <= arg.size) {
-                instr = "mov";
-            } else if (arg.is_signed) {
-                if (arg.size == DWord) {
-                    instr = "movsxd";
-                } else {
-                    instr = "movsx";
-                }
-            } else {
-                if (arg.size == DWord) {
-                    reg_arg = x86_64_linux_rax_registers[arg.size];
-                    instr = "mov";
-                } else {
-                    instr = "movzx";
-                }
-            }
+    Destination dst = {
+        .type = Memory,
+        .size = arg_dst.size,
+        .value.position = arg_dst.position
+    };
 
-            sb_appendf(out, "    %s %s, ", instr, reg_arg);
-            if (dst.size <= arg.size) insert_ptr_dimension(out, dst);
-            else insert_ptr_dimension(out, arg);
-            sb_appendf(out, " ptr [rbp - %zu]\n", arg.position);
-
-            sb_appendf(out, "    mov ");
-            insert_ptr_dimension(out, dst);
-            sb_appendf(out, " ptr [rbp - %zu], ", dst.position);
-            sb_appendf(out, "%s\n", reg_dst);
-        } break;
-        case Offset: {
-            sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.position);
-            sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst.position);
-        } break;
-        case ReturnVal: {
-            const char* reg_arg = x86_64_linux_rax_registers[arg.size];
-            sb_appendf(out, "    mov ");
-            insert_ptr_dimension(out, dst);
-            sb_appendf(out, " ptr [rbp - %zu], %s\n", dst.position, reg_arg);
-        } break;
-        default: UNREACHABLE("Invalid Arg type");
-    }
+    mov(out, dst, arg);
 }
 
 static void assign_local(String_Builder* out, Op op) {
@@ -345,7 +410,7 @@ static void routine_epilog(String_Builder* out, Op op) {
             case Position: sb_appendf(out, "    mov %s, [rbp - %zu]\n", reg, return_value.position); break;
             case Value: {
                 sb_appendf(out, "    mov %s, ", reg); 
-                insert_immediate(out, return_value);
+                append_immediate(out, return_value);
                 sb_appendf(out, "\n");
             } break;
             default: UNREACHABLE("Invalid Arg type");

@@ -1,7 +1,5 @@
 #include "lexer.h"
 #include "token.h"
-#include <stdbool.h>
-#include <stdint.h>
 #include "compiler.h"
 
 static Compiler comp = {0};
@@ -48,11 +46,38 @@ static Token consume() {
 }
 
 static bool expect_type(TokenType type) {
-    if (get_token().type != type) {
-        error_expected(type, get_token().type);
+    if (get_type() != type) {
+        error_expected(type, get_type());
         return false;
     }
     return true;
+}
+
+static bool expect_types(TokenType types[], size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        if (get_type() == types[i]) return true;
+    }
+    // TODO: Error message
+    return false;
+}
+
+static bool expect_var_type() {
+    TokenType var_types[] = {
+        VarTypei8,
+        VarTypei16,
+        VarTypei32,
+        VarTypei64,
+        VarTypeu8,
+        VarTypeu16,
+        VarTypeu32,
+        VarTypeu64,
+        VarTypef32,
+        VarTypef64
+    };
+
+    bool result = expect_types(var_types, sizeof(var_types) / sizeof(TokenType));
+    if (!result) error_msg("COMPILATION ERROR: Expected a var type");
+    return result;
 }
 
 static bool expect_and_consume(TokenType type) {
@@ -324,7 +349,7 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
             case EqualEqual:
             case BangEqual:
             case LessEqual:
-            case Less: return compile_binop(arg);
+            case Less: if (!compile_binop(arg)) return false; break;
             case Slash: TODO("Unsupported div op"); break;
             default: goto end_expr;
         }
@@ -421,11 +446,13 @@ static bool identifier_statement() {
 }
 
 static bool return_statement() {
-    consume();
+    consume(); // Consume Return
+
     Arg arg = {0};
     compile_expression(&arg);
-    comp.returned = true;
     push_op(OpReturn(arg));
+
+    comp.returned = true;
     return true;
 }
 
