@@ -19,6 +19,8 @@ const char* display_type(TokenType type) {
         case Slash: return "/";
         case Equal: return "=";
         case EqualEqual: return "==";
+        case ShiftRight: return ">>";
+        case ShiftLeft: return "<<";
         case Greater: return ">";
         case Less: return "<";
         case GreaterEqual: return ">=";
@@ -27,6 +29,7 @@ const char* display_type(TokenType type) {
         case Plus: return "+";
         case Minus: return "-";
         case Star: return "*";
+        case Ampersand: return "&";
         case VarTypei8: return "VarTypei8";
         case VarTypei16: return "VarTypei16";
         case VarTypei32: return "VarTypei32";

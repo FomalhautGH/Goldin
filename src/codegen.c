@@ -1,6 +1,7 @@
 #include "codegen.h"
 #include "compiler.h"
 #include "token.h"
+#include <assert.h>
 
 #define DIMENTIONS 4
 
@@ -19,6 +20,10 @@ static const char* x86_64_linux_rax_registers[] = {
 
 static const char* x86_64_linux_rbx_registers[] = {
     "bl", "bx", "ebx", "rbx"
+};
+
+static const char* x86_64_linux_rcx_registers[] = {
+    "cl", "cx", "ecx", "rcx"
 };
 
 static size_t round_to_next_pow2(size_t value) {
@@ -316,21 +321,60 @@ static void binary_operation_cmp(String_Builder* out, Op op, const char* instr) 
     binary_operation_load_cmp_dst(out, dst, instr);
 }
 
+static void binary_operation_shift(String_Builder* out, Op op) {
+    Arg lhs = op.binop.lhs;
+    Arg rhs = op.binop.rhs;
+    Arg arg_dst = op.binop.offset_dst;
+
+    const char* instr = NULL;
+
+    switch (op.binop.op) {
+        case LSh: instr = "sal"; break;
+        case RSh: instr = "sar"; break;
+        default: UNREACHABLE("");
+    }
+
+    Destination dst = {
+        .type = Register,
+        .size = arg_dst.size,
+        .value.reg = x86_64_linux_rbx_registers[arg_dst.size]
+    };
+
+    mov(out, dst, lhs);
+
+    switch (rhs.type) {
+        case Position: { TODO("");
+        } break;
+        case ReturnVal: { TODO("");
+        } break;
+        case Value: {
+            const char* rbx_reg = x86_64_linux_rbx_registers[arg_dst.size];
+            sb_appendf(out, "    %s %s, ", instr, rbx_reg);
+            append_immediate(out, rhs);
+            sb_appendf(out, "\n    mov [rbp - %zu], %s\n", arg_dst.position, rbx_reg);
+        } break;
+        case Offset: UNREACHABLE("Unsupported"); break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
+}
+
 static void binary_operation(String_Builder* out, Op op) {
-    Binop operation = op.binop.op;
+    BinaryOp operation = op.binop.op;
 
     switch (operation) {
         case Add: binary_operation_add(out, op); break;
         case Sub: binary_operation_sub(out, op); break;
-        case Mul: binary_operation_mul(out, op); break;
         // TODO: these instructions are all signed 
         // https://cs.brown.edu/courses/cs033/docs/guides/x64_cheatsheet.pdf
+        case Mul: binary_operation_mul(out, op); break;
         case Eq: binary_operation_cmp(out, op, "sete"); break;
         case Lt: binary_operation_cmp(out, op, "setl"); break;
         case Le: binary_operation_cmp(out, op, "setle"); break;
         case Gt: binary_operation_cmp(out, op, "setg"); break;
         case Ge: binary_operation_cmp(out, op, "setge"); break;
         case Ne: binary_operation_cmp(out, op, "setne"); break;
+        case LSh:
+        case RSh: binary_operation_shift(out, op); break;
         default: TODO("Binary operation unsupported yet");
     } 
 }
@@ -435,6 +479,28 @@ static void static_data(String_Builder* out, Arg* data) {
     }
 }
 
+static void unary(String_Builder* out, Op op) {
+    UnaryOp unop = op.unary.op;
+    Arg arg = op.unary.arg;
+    Arg dst = op.unary.offset_dst;
+
+    assert(arg.type == Position);
+
+    switch (unop) {
+        case Deref: { 
+            sb_appendf(out, "    mov rbx, qword ptr [rbp - %zu]\n", arg.position);
+            sb_appendf(out, "    mov rbx, qword ptr [rbx]\n");
+            sb_appendf(out, "    mov [rbp - %zu], rbx\n", dst.position);
+        } break;
+        case Ref: {
+            sb_appendf(out, "    lea rbx, [rbp - %zu]\n", arg.position);
+            sb_appendf(out, "    mov [rbp - %zu], rbx\n", dst.position);
+        }; break;
+        case Not: TODO(""); break;
+        default: UNREACHABLE("Invalid Unary Operation");
+    }
+}
+
 bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
     sb_appendf(out, ".intel_syntax noprefix\n");
     sb_appendf(out, ".text\n");
@@ -452,6 +518,8 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
             case JumpIfNot: jump_if_not(out, op); break;
             case Jump: jump(out, op); break;
             case Label: label(out, op); break;
+            case Unary: unary(out, op); break;
+            default: UNREACHABLE("Unsupported Operation");
         }
         // sb_appendf(out, "\n");
     }

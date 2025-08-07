@@ -1,0 +1,26 @@
+rt palindrome(u64 str) {
+    u64 len = strlen(str);
+    i32 i = 0;
+    i32 j = len - 1;
+
+    while (i < (len >> 1)) {
+        u8 x = *(str + i);
+        u8 y = *(str + j);
+
+        if (x != y) ret 0;
+
+        i = i + 1;
+        j = j - 1;
+    }
+
+    ret 1;
+}
+
+rt main() {
+    u64 str = "ciao";
+
+    i32 result = palindrome(str);
+    printf("Result: %d\n", result);
+
+    ret 0;
+}

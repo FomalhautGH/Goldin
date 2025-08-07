@@ -1,0 +1,7 @@
+rt main() {
+    i32 y = 69;
+    u64 x = &y; 
+
+    printf("%d\n", *x);
+    ret 0;
+}

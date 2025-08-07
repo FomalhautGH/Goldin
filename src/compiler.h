@@ -41,8 +41,16 @@ typedef enum {
     Le,
     Ge,
     Eq,
-    Ne
-} Binop;
+    Ne,
+    RSh,
+    LSh
+} BinaryOp;
+
+typedef enum {
+    Not,
+    Deref,
+    Ref
+} UnaryOp;
 
 typedef struct {
     enum {
@@ -51,6 +59,7 @@ typedef struct {
         AssignLocal,
         RoutineCall,
         Binary,
+        Unary,
         Label,
         JumpIfNot,
         Jump
@@ -61,7 +70,8 @@ typedef struct {
         struct { Arg ret; } return_routine;
         struct { Arg offset_dst; Arg arg; } assign_loc;
         struct { const char* name; Arg* args; } routine_call;
-        struct { Arg offset_dst; Binop op; Arg lhs; Arg rhs; } binop;
+        struct { Arg offset_dst; BinaryOp op; Arg lhs; Arg rhs; } binop;
+        struct { Arg offset_dst; UnaryOp op; Arg arg; } unary;
         struct { size_t label; Arg arg; } jump_if_not;
         struct { size_t label; } jump;
         struct { size_t index; } label;
@@ -71,6 +81,7 @@ typedef struct {
 #define OpAssignLocal(dst, src) (Op) {.type = AssignLocal, .assign_loc = { dst, src }}
 #define OpRoutineCall(name, args) (Op) {.type = RoutineCall, .routine_call = { name, args }}
 #define OpBinary(dst, op, lhs, rhs) (Op) {.type = Binary, .binop = { dst, op, lhs, rhs }}
+#define OpUnary(dst, op, arg) (Op) {.type = Unary, .unary = { dst, op, arg }}
 #define OpJumpIfNot(label, arg) (Op) {.type = JumpIfNot, .jump_if_not = { label, arg }}
 #define OpJump(label) (Op) {.type = Jump, .jump = { label }}
 #define OpLabel(index) (Op) {.type = Label, .label = { index }}

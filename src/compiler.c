@@ -264,13 +264,15 @@ static bool compile_binop(Arg* arg) {
     consume();
     if (!compile_expression_wrapped(&rhs, op_type)) return false;
 
-    Binop binop = 0;
+    BinaryOp binop = 0;
     Size size = max(arg->size, rhs.size);
     switch (op_type) {
         case Plus: binop = Add; break;
         case Minus: binop = Sub; break;
         case Star: binop = Mul; break;
         case Slash: binop = Div; break;
+        case ShiftRight: binop = RSh; break;
+        case ShiftLeft: binop = LSh; break;
         case EqualEqual: size = Byte; binop = Eq; break;
         case Less: size = Byte; binop = Lt; break;
         case LessEqual: size = Byte; binop = Le; break;
@@ -322,14 +324,57 @@ static bool string_literal_to_arg(Arg* arg) {
     return true;
 }
 
+static bool grouping(Arg* arg) {
+    consume(); // Consume LeftParen
+    if (!compile_expression(arg)) return false;
+    consume(); // Consume RightParen
+    return true;
+}
+
+static bool dereferencing(Arg* arg) {
+    consume(); // Consume Star
+
+    Arg ptr = {0};
+    if (!compile_expression(&ptr)) return false;
+
+    *arg = (Arg) {  
+        .size = QWord, // TODO: do not hardcode this
+        .type = Position,
+        .position = comp.position,
+        .is_signed = true // TODO: do not hardcode this
+    };
+
+    push_op(OpUnary(*arg, Deref, ptr));
+    return true;
+}
+
+static bool referencing(Arg* arg) {
+    consume(); // Consume Star
+
+    Arg ptr = {0};
+    if (!compile_expression(&ptr)) return false;
+
+    *arg = (Arg) {  
+        .size = QWord,
+        .type = Position,
+        .position = comp.position,
+        .is_signed = true // TODO: do not hardcode this
+    };
+
+    push_op(OpUnary(*arg, Ref, ptr));
+    return true;
+}
+
 static bool compile_primary_expression(Arg* arg) {
     switch (get_type()) {
         case Identifier: return identifier_expression(arg);
         case IntLiteral: return int_literal_to_arg(arg);
         case StringLiteral: return string_literal_to_arg(arg);
-        case LeftParen: TODO("Groupings unsupported yet"); break;
+        case LeftParen: return grouping(arg);
+        case Star: return dereferencing(arg);
+        case Ampersand: return referencing(arg);
         case RealLiteral: TODO("Floats unsupported yet"); break;
-        default: error_msg("COMPILATION ERROR: Expected expression"); return false;
+        default: print_current_type(); error_msg("COMPILATION ERROR: Expected expression"); return false;
     }
 
     return true;
@@ -349,6 +394,8 @@ static bool compile_expression_wrapped(Arg* arg, TokenType min_binding) {
             case EqualEqual:
             case BangEqual:
             case LessEqual:
+            case ShiftLeft:
+            case ShiftRight:
             case Less: if (!compile_binop(arg)) return false; break;
             case Slash: TODO("Unsupported div op"); break;
             default: goto end_expr;

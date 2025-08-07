@@ -180,11 +180,15 @@ bool next_token() {
         case '-': lexer.token_type = Minus; break;
         case ',': lexer.token_type = Comma; break;
         case '*': lexer.token_type = Star; break;
+        case '&': lexer.token_type = Ampersand; break;
         case '"': parse_string(); break;
         case '>': {
             if (peek() == '=') {
                 consume();
                 lexer.token_type = GreaterEqual;
+            } else if (peek() == '>'){
+                consume();
+                lexer.token_type = ShiftRight;
             } else {
                 lexer.token_type = Greater;
             }
@@ -193,6 +197,9 @@ bool next_token() {
             if (peek() == '=') {
                 consume();
                 lexer.token_type = LessEqual;
+            } else if (peek() == '<'){
+                consume();
+                lexer.token_type = ShiftLeft;
             } else {
                 lexer.token_type = Less;
             }

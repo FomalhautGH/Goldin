@@ -40,10 +40,13 @@ typedef enum {
     Less,
     GreaterEqual,
     LessEqual,
+    ShiftRight,
+    ShiftLeft,
     Plus,
     Minus,
     Star,
     Slash,
+    Ampersand,
 
     Identifier,
     IntLiteral,
