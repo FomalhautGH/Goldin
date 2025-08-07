@@ -22,10 +22,6 @@ static const char* x86_64_linux_rbx_registers[] = {
     "bl", "bx", "ebx", "rbx"
 };
 
-static const char* x86_64_linux_rcx_registers[] = {
-    "cl", "cx", "ecx", "rcx"
-};
-
 static size_t round_to_next_pow2(size_t value) {
     --value;
     value |= value >> 1;
@@ -466,19 +462,6 @@ static void routine_epilog(String_Builder* out, Op op) {
     sb_appendf(out, "    ret\n");
 }
 
-static void generate_static_data(String_Builder* out, Arg arg, size_t index) {
-    assert(arg.type == Offset);
-    sb_appendf(out, ".str_%zu:\n", index);
-    sb_appendf(out, "    .asciz \"%s\"\n", arg.string);
-    sb_appendf(out, "    .size .str_%zu, %zu\n", index, strlen(arg.string) + 1);
-}
-
-static void static_data(String_Builder* out, Arg* data) {
-    for (size_t i = 0; i < arrlenu(data); ++i) {
-        generate_static_data(out, data[i], i);
-    }
-}
-
 static void unary(String_Builder* out, Op op) {
     UnaryOp unop = op.unary.op;
     Arg arg = op.unary.arg;
@@ -498,6 +481,19 @@ static void unary(String_Builder* out, Op op) {
         }; break;
         case Not: TODO(""); break;
         default: UNREACHABLE("Invalid Unary Operation");
+    }
+}
+
+static void generate_static_data(String_Builder* out, Arg arg, size_t index) {
+    assert(arg.type == Offset);
+    sb_appendf(out, ".str_%zu:\n", index);
+    sb_appendf(out, "    .asciz \"%s\"\n", arg.string);
+    sb_appendf(out, "    .size .str_%zu, %zu\n", index, strlen(arg.string) + 1);
+}
+
+static void static_data(String_Builder* out, Arg* data) {
+    for (size_t i = 0; i < arrlenu(data); ++i) {
+        generate_static_data(out, data[i], i);
     }
 }
 

@@ -10,6 +10,28 @@ static bool while_statement();
 static bool compile_expression(Arg* arg);
 static bool compile_expression_wrapped(Arg* arg, TokenType min_binding);
 
+static void free_arg(Arg arg) {
+    if (arg.type == Offset && arg.is_signed) free(arg.string);
+}
+
+static void push_local_vars() {
+    arrpush(comp.local_vars, NULL);
+}
+
+static void pop_local_vars() {
+    size_t last = arrlenu(comp.local_vars) - 1;
+    VarsHashmap* current = comp.local_vars[last];
+
+    for (size_t i = 0; i < shlenu(current); ++i) {
+        VarsHashmap x = current[i];
+        free(x.key);
+        free_arg(x.value);
+    }
+
+    shfree(current);
+    arrpop(comp.local_vars);
+}
+
 const char* display_op(Op op) {
     switch (op.type) {
         case AssignLocal: return "AssignLocal";
@@ -86,9 +108,16 @@ static bool expect_and_consume(TokenType type) {
     return true;
 }
 
-static const char* expect_consume_id_and_get_string() {
+static char* expect_consume_string_and_get_string() {
+    if (!expect_type(StringLiteral)) return NULL; 
+    char* result = strdup(get_value().items);
+    next_token();
+    return result;
+}
+
+static char* expect_consume_id_and_get_string() {
     if (!expect_type(Identifier)) return NULL; 
-    const char* result = strdup(get_value().items);
+    char* result = strdup(get_value().items);
     next_token();
     return result;
 }
@@ -196,7 +225,7 @@ static bool int_literal_to_arg(Arg* arg) {
     return true;
 }
 
-static bool routine_call(Arg* arg, const char* name) {
+static bool routine_call(Arg* arg, char* name) {
     Arg temp_arg = {0};
     Arg* args = NULL;
     consume();
@@ -233,13 +262,10 @@ static bool routine_call(Arg* arg, const char* name) {
 }
 
 static bool identifier_expression(Arg* arg) {
-    const char* name = strdup(get_value().items);
-    consume(); // Consume Identifier
+    char* name = expect_consume_id_and_get_string();
+    if (name == NULL) return false;
     
-    if (get_type() == LeftParen) {
-        if (!routine_call(arg, name)) return false;
-        return true;
-    }
+    if (get_type() == LeftParen) return routine_call(arg, name);
 
     Arg var = find_local_var(name);
     if (var.position == 0) {
@@ -254,6 +280,7 @@ static bool identifier_expression(Arg* arg) {
         .is_signed = var.is_signed
     };
 
+    free(name);
     return true;
 }
 
@@ -308,19 +335,22 @@ static bool string_literal_to_arg(Arg* arg) {
         .type = Offset,
         .size = QWord,
         .position = arrlenu(comp.static_data),
-        .is_signed = false
+        .is_signed = false,
     };
 
+    // TODO: here I'm using the .is_signed attribute to distinquish
+    // whether or not I should free the .string attribute. 
+    // Since in the arg above even though the type is Offset the
+    // .string attrubite is not set resulting in a invalid free of the memory.
     Arg data = {
         .size = QWord,
         .type = Offset,
-        .is_signed = false,
-        .string = strdup(get_value().items)
+        .is_signed = true, 
+        .string = expect_consume_string_and_get_string()
     };
 
+    if (data.string == NULL) return false;
     arrpush(comp.static_data, data);
-
-    consume(); // Consume StringLiteral
     return true;
 }
 
@@ -410,7 +440,7 @@ static bool compile_expression(Arg* arg) {
     return compile_expression_wrapped(arg, 0);
 }
 
-static bool assignment(const char* name) {
+static bool assignment(char* name) {
     consume(); // Consume Equal
 
     Arg var = find_local_var(name);
@@ -431,7 +461,7 @@ static bool assignment(const char* name) {
     };
     push_op(OpAssignLocal(dst, arg));
 
-    free((void*)name);
+    free(name);
     return true;
 }
 
@@ -457,12 +487,14 @@ static bool variable_initialization(TokenType var_type) {
 
 static bool variable_declaration() {
     TokenType var_type = get_type();
+    consume(); // Consume VarType
 
-    consume();
-    const char* var_name = expect_consume_id_and_get_string();
+    char* var_name = expect_consume_id_and_get_string();
+    if (var_name == NULL) return false;
+
     if (find_local_var(var_name).position != 0) {
         error_msg("COMPILATION ERROR: Redefinition of variable");
-        free((void*)var_name);
+        free(var_name);
         return false;
     }
 
@@ -480,7 +512,8 @@ static bool variable_declaration() {
 }
 
 static bool identifier_statement() {
-    const char* name = expect_consume_id_and_get_string();
+    char* name = expect_consume_id_and_get_string();
+    if (name == NULL) return false;
 
     switch (get_type()) {
         case SemiColon: return true;
@@ -562,13 +595,13 @@ static bool statement() {
 
 static bool block_statement() {
     if (!expect_and_consume(LeftBracket)) return false;
-    arrpush(comp.local_vars, NULL);
+    push_local_vars();
 
     while (!is_eof() && get_type() != RightBracket) {
         if (!statement()) return false;
     }
 
-    arrpop(comp.local_vars);
+    pop_local_vars();
     if (!expect_and_consume(RightBracket)) return false;
     return true;
 }
@@ -596,8 +629,9 @@ static bool routine_argument(Arg* args[]) {
     TokenType var_type = get_type();
     consume(); // Consume VarType
 
-    const char* name = strdup(get_value().items);
-    consume(); // Consume Identifier
+    const char* name = expect_consume_id_and_get_string();
+    if (name == NULL) return false;
+
     declare_variable(var_type, name);
 
     Arg arg = {
@@ -632,15 +666,15 @@ static bool compile_routine_body() {
 
 static bool compile_routine() {
     consume(); // Consume Routine
-    if (!expect_type(Identifier)) return false;
-    const char* routine_name = strdup(get_value().items);
-    consume(); // Consume Identifier
+
+    char* routine_name = expect_consume_id_and_get_string();
+    if (routine_name == NULL) return false;
 
     size_t rt = push_op(OpNewRoutine(routine_name, 0, NULL));
 
     size_t prev_pos = comp.position;
     comp.position = 0;
-    arrpush(comp.local_vars, NULL);
+    push_local_vars();
 
     Arg* args = NULL;
     if (!compile_routine_arguments(&args)) return false;
@@ -655,7 +689,8 @@ static bool compile_routine() {
     comp.ops[rt].new_routine.args = args;
 
     comp.position = prev_pos;
-    arrpop(comp.local_vars);
+
+    pop_local_vars();
     return true;
 }
 
@@ -668,11 +703,56 @@ void init_compiler() {
     comp.returned = false;
 }
 
+static void free_op(Op op) {
+    switch (op.type) {
+        case RoutineCall: 
+            for (size_t i = 0; i < arrlenu(op.routine_call.args); ++i) free_arg(op.routine_call.args[i]);
+            arrfree(op.routine_call.args);
+            free(op.routine_call.name);
+            break;
+
+        case NewRoutine: 
+            for (size_t i = 0; i < arrlenu(op.new_routine.args); ++i) free_arg(op.new_routine.args[i]);
+            arrfree(op.new_routine.args);
+            free(op.new_routine.name);
+            break;
+
+        case RtReturn: 
+            free_arg(op.return_routine.ret);
+            break;
+
+        case AssignLocal:
+            free_arg(op.assign_loc.arg);
+            free_arg(op.assign_loc.offset_dst);
+            break;
+
+        case Binary:
+            free_arg(op.binop.lhs);
+            free_arg(op.binop.rhs);
+            free_arg(op.binop.offset_dst);
+            break;
+
+        case Unary: 
+            free_arg(op.unary.arg);
+            break;
+
+        case JumpIfNot: 
+            free_arg(op.jump_if_not.arg);
+            break;
+
+        case Jump: break;
+        case Label: break;
+        default: UNREACHABLE("Unsupported Operation");
+    }
+}
+
 void free_compiler() {
+    for (size_t i = 0; i < arrlenu(comp.ops); ++i) free_op(comp.ops[i]);
     for (size_t i = 0; i < arrlenu(comp.local_vars); ++i) shfree(comp.local_vars[i]);
-    arrfree(comp.static_data);
+    for (size_t i = 0; i < arrlenu(comp.static_data); ++i) free_arg(comp.static_data[i]);
     arrfree(comp.ops);
     arrfree(comp.local_vars);
+    arrfree(comp.static_data);
 }
 
 Op* get_ops() {

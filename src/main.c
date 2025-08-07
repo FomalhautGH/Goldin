@@ -12,11 +12,13 @@
 #define FLAG_IMPLEMENTATION
 #include "flag.h"
 
-#define WRONG_USAGE 2
-#define FILE_NOT_FOUND 3
-#define GEN_ERROR 4
-#define FAILED_CMD 5
-#define COMPILATION_ERROR 6
+typedef enum {
+    WRONG_USAGE = 101,
+    FILE_NOT_FOUND,
+    GEN_ERROR,
+    FAILED_CMD,
+    COMPILATION_ERROR,
+} ExitCodes;
 
 static void print_usage(FILE* stream, const char* exe_name) {
     fprintf(stderr, "Usage: %s [OPTIONS] <inputs...> \n", exe_name);
@@ -55,12 +57,19 @@ int main(int argc, char** argv) {
     if (!init_lexer(file_name)) exit(FILE_NOT_FOUND);
 
     init_compiler();
-    if (!generate_ops()) exit(COMPILATION_ERROR);
+    if (!generate_ops()) {
+        free_lexer();
+        exit(COMPILATION_ERROR);
+    }
 
     Op* ops = get_ops();
     Arg* data = get_data();
     String_Builder result = {0};
-    if (!generate_GAS_x86_64(&result, ops, data)) exit(GEN_ERROR);
+    if (!generate_GAS_x86_64(&result, ops, data)) {
+        free_lexer();
+        free_compiler();
+        exit(GEN_ERROR);
+    }
 
     String_Builder asm_file = {0};
     sb_appendf(&asm_file, "%s.asm", file_name);
@@ -72,13 +81,19 @@ int main(int argc, char** argv) {
     if (*library != NULL) nob_cmd_append(&assemble, "-l", *library);
     nob_cc_output(&assemble, *output_file);
     nob_cc_inputs(&assemble, asm_file.items);
-    if (!cmd_run_sync_and_reset(&assemble)) exit(FAILED_CMD);
+    if (!cmd_run_sync_and_reset(&assemble)) {
+        free_lexer();
+        free_compiler();
+        sb_free(result);
+        sb_free(asm_file);
+        cmd_free(assemble);
+        exit(FAILED_CMD);
+    }
 
     free_lexer();
     free_compiler();
     sb_free(result);
     sb_free(asm_file);
     cmd_free(assemble);
-
     exit(EXIT_SUCCESS);
 }

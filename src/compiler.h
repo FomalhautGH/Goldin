@@ -27,7 +27,7 @@ typedef struct {
     union { 
         int64_t buffer;
         size_t position;
-        const char* string;
+        char* string;
     };
 } Arg;
 
@@ -66,10 +66,10 @@ typedef struct {
     } type;
 
     union {
-        struct { const char* name; size_t bytes; Arg* args; } new_routine;
+        struct { char* name; size_t bytes; Arg* args; } new_routine;
         struct { Arg ret; } return_routine;
         struct { Arg offset_dst; Arg arg; } assign_loc;
-        struct { const char* name; Arg* args; } routine_call;
+        struct { char* name; Arg* args; } routine_call;
         struct { Arg offset_dst; BinaryOp op; Arg lhs; Arg rhs; } binop;
         struct { Arg offset_dst; UnaryOp op; Arg arg; } unary;
         struct { size_t label; Arg arg; } jump_if_not;
@@ -96,7 +96,7 @@ typedef struct {
      _a > _b ? _a : _b; })
 
 typedef struct {
-    const char* key;
+    char* key;
     Arg value;
 } VarsHashmap;
 

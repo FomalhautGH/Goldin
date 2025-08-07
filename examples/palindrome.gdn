@@ -17,7 +17,7 @@ rt palindrome(u64 str) {
 }
 
 rt main() {
-    u64 str = "ciao";
+    u64 str = "radar";
 
     i32 result = palindrome(str);
     printf("Result: %d\n", result);
