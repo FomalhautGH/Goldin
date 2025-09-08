@@ -1,7 +1,8 @@
 # Goldin Programming language
 
 ## Description
-Goldin is toy programming language built for educational purposes
+Goldin is toy programming language built for educational purposes 
+that compiles directly to x86_64 native linux assembly.
 
 ## Dependencies
 - clang

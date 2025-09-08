@@ -14,6 +14,43 @@ static void free_arg(Arg arg) {
     if (arg.type == Offset && arg.is_signed) free(arg.string);
 }
 
+static Arg construct_arg(ArgType type, ...) {
+    Arg result = {0};
+    va_list list;
+    va_start(list, type);
+
+    result.type = type;
+    result.size = va_arg(list, Size);
+    result.is_signed = va_arg(list, int);
+
+    switch (type) {
+        case Position: result.position = va_arg(list, size_t); break;
+        case Value: result.buffer = va_arg(list, int64_t); break;
+        case Offset: result.offset = va_arg(list, size_t); break;
+        case ReturnVal: break;
+        default: UNREACHABLE("Invalid Arg type");
+    }
+
+    va_end(list);
+    return result;
+}
+
+static Arg arg_position(Size size, bool is_signed, size_t pos) {
+    return construct_arg(Position, size, is_signed, pos);
+}
+
+static Arg arg_value(Size size, bool is_signed, int64_t val) {
+    return construct_arg(Value, size, is_signed, val);
+}
+
+static Arg arg_offset(Size size, bool is_signed, size_t offset) {
+    return construct_arg(Offset, size, is_signed, offset);
+}
+
+static Arg arg_return(Size size) {
+    return construct_arg(ReturnVal, size, false);
+}
+
 static void push_local_vars() {
     arrpush(comp.local_vars, NULL);
 }
@@ -42,6 +79,7 @@ const char* display_op(Op op) {
         case Label: return "Label";
         case JumpIfNot: return "JumpIfNot";
         case Jump: return "Jump";
+        case Unary: return "Unary";
         default: UNREACHABLE("");
     }
 }
@@ -193,12 +231,7 @@ static bool declare_variable(TokenType var_type, const char* name) {
     Size size = get_var_size(var_type);
     alloc_size(size);
 
-    Arg var = {
-        .position = comp.position,
-        .type = Position,
-        .size = size,
-        .is_signed = is_var_signed(var_type)
-    };
+    Arg var = arg_position(size, is_var_signed(var_type), comp.position);
 
     size_t last = arrlenu(comp.local_vars) - 1;
     shput(comp.local_vars[last], name, var);
@@ -212,15 +245,7 @@ static void print_current_type() {
 static bool int_literal_to_arg(Arg* arg) {
     // TODO: Check errno in convertions and overflow if literal too big
     int64_t value = strtol(get_value().items, NULL, 10);
-
-    *arg = (Arg) {
-        .size = QWord,
-        .type = Value,
-        .is_signed = true
-    };
-
-    memcpy(&arg->buffer, &value, sizeof(int64_t));
-
+    *arg = arg_value(QWord, true, value);
     consume(); // Consume IntLiteral
     return true;
 }
@@ -254,10 +279,7 @@ static bool routine_call(Arg* arg, char* name) {
 
     push_op(OpRoutineCall(name, args));
     if (!expect_and_consume(RightParen)) return false;
-    if (arg) {
-        arg->type = ReturnVal;
-        arg->size = QWord;
-    }
+    if (arg) *arg = arg_return(QWord);
     return true;
 }
 
@@ -273,12 +295,7 @@ static bool identifier_expression(Arg* arg) {
         return false;
     }
     
-    *arg = (Arg) {
-        .type = Position,
-        .size = var.size,
-        .position = var.position,
-        .is_signed = var.is_signed
-    };
+    *arg = arg_position(var.size, var.is_signed, var.position);
 
     free(name);
     return true;
@@ -311,37 +328,23 @@ static bool compile_binop(Arg* arg) {
 
     alloc_size(size);
     
-    Arg dst = {
-        .type = Position,
-        .size = size,
-        .position = comp.position,
-        .is_signed = false // TODO: do not hardcode this
-    };
-
+    // TODO: do not hardcode signed
+    Arg dst = arg_position(size, false, comp.position);
     push_op(OpBinary(dst, binop, *arg, rhs));
 
-    *arg = (Arg) {
-        .type = Position,
-        .size = size,
-        .position = comp.position,
-        .is_signed = false // TODO: do not hardcode this
-    };
-
+    // TODO: do not hardcode signed
+    *arg = arg_position(size, false, comp.position);
     return true;
 }
 
 static bool string_literal_to_arg(Arg* arg) {
-    *arg = (Arg) {
-        .type = Offset,
-        .size = QWord,
-        .position = arrlenu(comp.static_data),
-        .is_signed = false,
-    };
+    *arg = arg_offset(QWord, false, arrlenu(comp.static_data));
 
     // TODO: here I'm using the .is_signed attribute to distinquish
     // whether or not I should free the .string attribute. 
     // Since in the arg above even though the type is Offset the
-    // .string attrubite is not set resulting in a invalid free of the memory.
+    // .string attrubite is not set resulting in a invalid free of the memory
+    // if i free all strings of offset args
     Arg data = {
         .size = QWord,
         .type = Offset,
@@ -367,12 +370,7 @@ static bool dereferencing(Arg* arg) {
     Arg ptr = {0};
     if (!compile_expression(&ptr)) return false;
 
-    *arg = (Arg) {  
-        .size = QWord, // TODO: do not hardcode this
-        .type = Position,
-        .position = comp.position,
-        .is_signed = true // TODO: do not hardcode this
-    };
+    *arg = arg_position(ptr.size, ptr.is_signed, comp.position);
 
     push_op(OpUnary(*arg, Deref, ptr));
     return true;
@@ -381,17 +379,11 @@ static bool dereferencing(Arg* arg) {
 static bool referencing(Arg* arg) {
     consume(); // Consume Star
 
-    Arg ptr = {0};
-    if (!compile_expression(&ptr)) return false;
+    Arg expr = {0};
+    if (!compile_expression(&expr)) return false;
 
-    *arg = (Arg) {  
-        .size = QWord,
-        .type = Position,
-        .position = comp.position,
-        .is_signed = true // TODO: do not hardcode this
-    };
-
-    push_op(OpUnary(*arg, Ref, ptr));
+    *arg = arg_position(QWord, expr.is_signed, comp.position);
+    push_op(OpUnary(*arg, Ref, expr));
     return true;
 }
 
@@ -450,15 +442,9 @@ static bool assignment(char* name) {
     }
 
     Arg arg = {0};
-    arg.size = var.size;
     if (!compile_expression(&arg)) return false;
 
-    Arg dst = {
-        .type = Position,
-        .size = var.size,
-        .position = var.position,
-        .is_signed = var.is_signed
-    };
+    Arg dst = arg_position(var.size, var.is_signed, var.position);
     push_op(OpAssignLocal(dst, arg));
 
     free(name);
@@ -469,12 +455,7 @@ static bool variable_initialization(TokenType var_type) {
     consume(); // Consume Equals
 
     Arg arg = {0};
-    Arg dst = {
-        .size = get_var_size(var_type),
-        .type = Position,
-        .position = 0,
-        .is_signed = is_var_signed(var_type)
-    };
+    Arg dst = arg_position(get_var_size(var_type), is_var_signed(var_type), 0);
 
     size_t current_position = comp.position;
     if (!compile_expression(&arg)) return false;
@@ -634,13 +615,7 @@ static bool routine_argument(Arg* args[]) {
 
     declare_variable(var_type, name);
 
-    Arg arg = {
-        .size = get_var_size(var_type),
-        .type = Position,
-        .position = comp.position,
-        .is_signed = is_var_signed(var_type)
-    };
-
+    Arg arg = arg_position(get_var_size(var_type), is_var_signed(var_type), comp.position);
     arrpush(*args, arg);
     return true;
 }
@@ -705,41 +680,34 @@ void init_compiler() {
 
 static void free_op(Op op) {
     switch (op.type) {
-        case RoutineCall: 
+        case RoutineCall: {
             for (size_t i = 0; i < arrlenu(op.routine_call.args); ++i) free_arg(op.routine_call.args[i]);
             arrfree(op.routine_call.args);
             free(op.routine_call.name);
-            break;
-
-        case NewRoutine: 
+        } break;
+        case NewRoutine: {
             for (size_t i = 0; i < arrlenu(op.new_routine.args); ++i) free_arg(op.new_routine.args[i]);
             arrfree(op.new_routine.args);
             free(op.new_routine.name);
-            break;
-
-        case RtReturn: 
+        } break;
+        case RtReturn: {
             free_arg(op.return_routine.ret);
-            break;
-
-        case AssignLocal:
+        } break;
+        case AssignLocal: {
             free_arg(op.assign_loc.arg);
             free_arg(op.assign_loc.offset_dst);
-            break;
-
-        case Binary:
+        } break;
+        case Binary: {
             free_arg(op.binop.lhs);
             free_arg(op.binop.rhs);
             free_arg(op.binop.offset_dst);
-            break;
-
-        case Unary: 
+        } break;
+        case Unary: {
             free_arg(op.unary.arg);
-            break;
-
-        case JumpIfNot: 
+        } break;
+        case JumpIfNot: {
             free_arg(op.jump_if_not.arg);
-            break;
-
+        } break;
         case Jump: break;
         case Label: break;
         default: UNREACHABLE("Unsupported Operation");

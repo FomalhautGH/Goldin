@@ -108,7 +108,7 @@ static void mov_to_register(String_Builder* out, Destination dst, Arg arg) {
         } break;
         case Offset: {
             assert(arg.size == QWord && dst.size == QWord);
-            sb_appendf(out, "    movabs %s, offset .str_%zu\n", dst_reg, arg.position);
+            sb_appendf(out, "    movabs %s, offset .str_%zu\n", dst_reg, arg.offset);
         } break;
         case ReturnVal: {
             sb_appendf(out, "    mov %s, %s\n", dst_reg, x86_64_linux_rax_registers[dst.size]);
@@ -142,7 +142,7 @@ static void mov_to_memory(String_Builder* out, Destination dst, Arg arg) {
             sb_appendf(out, "%s\n", reg_dst);
         } break;
         case Offset: {
-            sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.position);
+            sb_appendf(out, "    movabs rax, offset .str_%zu\n", arg.offset);
             sb_appendf(out, "    mov qword ptr [rbp - %zu], rax\n", dst_pos);
         } break;
         case ReturnVal: {
@@ -186,7 +186,7 @@ static void routine_call_arg_position(String_Builder* out, Arg arg, size_t reg_i
 
 static void routine_call_arg_offset(String_Builder* out, Arg arg, size_t reg_index) {
     assert(arg.size == QWord);
-    sb_appendf(out, "    movabs %s, offset .str_%zu\n", x86_64_linux_call_registers[reg_index][QWord], arg.position);
+    sb_appendf(out, "    movabs %s, offset .str_%zu\n", x86_64_linux_call_registers[reg_index][QWord], arg.offset);
 }
 
 static void routine_call_arg_returnval(String_Builder* out, Arg arg, size_t reg_index) {
@@ -308,9 +308,6 @@ static void binary_operation_cmp(String_Builder* out, Op op, const char* instr) 
     Arg lhs = op.binop.lhs;
     Arg rhs = op.binop.rhs;
     Arg dst = op.binop.offset_dst;
-
-    // TODO: support typecheking in expressions in order to always have the same size
-    // assert(lhs.size == rhs.size);
 
     binary_operation_load_factor(out, lhs, "mov");
     binary_operation_load_factor(out, rhs, "cmp");
@@ -446,8 +443,8 @@ static void routine_epilog(String_Builder* out, Op op) {
         const char* reg = x86_64_linux_rax_registers[return_value.size];
         switch (return_value.type) {
             // TODO: just strings for now
-            case Offset: sb_appendf(out, "    movabs rax, offset .str_%zu\n", return_value.position); break;
             case Position: sb_appendf(out, "    mov %s, [rbp - %zu]\n", reg, return_value.position); break;
+            case Offset: sb_appendf(out, "    movabs rax, offset .str_%zu\n", return_value.offset); break;
             case Value: {
                 sb_appendf(out, "    mov %s, ", reg); 
                 append_immediate(out, return_value);
@@ -504,7 +501,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
     size_t len = arrlenu(ops);
     for (size_t i = 0; i < len; ++i) {
         Op op = ops[i];
-        // sb_appendf(out, "# %s\n", display_op(op));
+        sb_appendf(out, "# %s\n", display_op(op));
         switch (op.type) {
             case RoutineCall: routine_call(out, op); break;
             case NewRoutine: routine_prolog(out, op); break;
@@ -517,7 +514,7 @@ bool generate_GAS_x86_64(String_Builder* out, Op* ops, Arg* data) {
             case Unary: unary(out, op); break;
             default: UNREACHABLE("Unsupported Operation");
         }
-        // sb_appendf(out, "\n");
+        sb_appendf(out, "\n");
     }
 
     static_data(out, data);

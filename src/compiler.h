@@ -15,18 +15,21 @@ typedef enum {
     QWord 
 } Size;
 
+typedef enum {
+    Position,
+    Value,
+    Offset,
+    ReturnVal
+} ArgType;
+
 typedef struct {
     Size size;
     bool is_signed;
-    enum { 
-        Position,
-        Value,
-        Offset,
-        ReturnVal
-    } type;
+    ArgType type;
     union { 
         int64_t buffer;
         size_t position;
+        size_t offset;
         char* string;
     };
 } Arg;
